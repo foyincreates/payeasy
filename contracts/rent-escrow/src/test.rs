@@ -246,3 +246,39 @@ fn test_initialize_accepts_min_rent() {
     // rent_amount exactly at MIN_RENT (100) must succeed
     client.initialize(&landlord, &token_address, &100_i128, &TEST_DEADLINE, &roommate_shares);
 }
+
+#[test]
+fn test_initialize_valid_landlord() {
+    let env = Env::default();
+    let contract_id = env.register(RentEscrowContract, ());
+    let client = RentEscrowContractClient::new(&env, &contract_id);
+
+    let landlord = Address::generate(&env);
+    let token_address = Address::generate(&env);
+    let roommate = Address::generate(&env);
+
+    let mut roommate_shares = Map::new(&env);
+    roommate_shares.set(roommate.clone(), 1000_i128);
+
+    env.mock_all_auths();
+    // Should succeed with a valid (non-contract) landlord address
+    client.initialize(&landlord, &token_address, &1000_i128, &TEST_DEADLINE, &roommate_shares);
+}
+
+#[test]
+#[should_panic(expected = "landlord cannot be the contract itself")]
+fn test_initialize_reverts_when_landlord_is_contract() {
+    let env = Env::default();
+    let contract_id = env.register(RentEscrowContract, ());
+    let client = RentEscrowContractClient::new(&env, &contract_id);
+
+    let token_address = Address::generate(&env);
+    let roommate = Address::generate(&env);
+
+    let mut roommate_shares = Map::new(&env);
+    roommate_shares.set(roommate.clone(), 1000_i128);
+
+    env.mock_all_auths();
+    // Passing the contract's own address as landlord must revert
+    client.initialize(&contract_id, &token_address, &1000_i128, &TEST_DEADLINE, &roommate_shares);
+}

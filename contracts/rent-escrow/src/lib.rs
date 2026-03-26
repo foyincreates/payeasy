@@ -61,6 +61,11 @@ pub struct RentEscrowContract;
 #[contractimpl]
 impl RentEscrowContract {
     /// Initialize the escrow with landlord, rent amount, and roommates.
+    ///
+    /// Reverts if `landlord` is the contract itself.
+    ///
+    /// Persists the escrow state to ledger storage so that the values
+    /// survive across invocations and ledger closes.
     pub fn initialize(
         env: Env,
         landlord: Address,
@@ -69,6 +74,11 @@ impl RentEscrowContract {
         deadline: u64,
         roommates: Map<Address, i128>,
     ) -> Result<(), Error> {
+        // Zero-address guard: landlord must not be the contract itself
+        if landlord == env.current_contract_address() {
+            panic!("landlord cannot be the contract itself");
+        }
+
         landlord.require_auth();
 
         if rent_amount < MIN_RENT {
