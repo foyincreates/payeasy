@@ -1,5 +1,5 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, contracterror, Address, Env, Map};
+use soroban_sdk::{contract, contractimpl, contracttype, contracterror, token, Address, Env, Map};
 
 /// Minimum rent amount in stroops/token-units to prevent micro-escrow spam
 pub const MIN_RENT: i128 = 100;
@@ -40,6 +40,7 @@ pub struct RoommateState {
 #[derive(Clone)]
 pub struct RentEscrow {
     pub landlord: Address,
+    pub token: Address,
     pub rent_amount: i128,
     pub roommates: Map<Address, RoommateState>,
 }
@@ -49,10 +50,11 @@ pub struct RentEscrowContract;
 
 #[contractimpl]
 impl RentEscrowContract {
-    /// Initialize the escrow with landlord, rent amount, and roommates.
+    /// Initialize the escrow with landlord, token, rent amount, deadline, and roommates.
     pub fn initialize(
         env: Env,
         landlord: Address,
+        token: Address,
         rent_amount: i128,
         deadline: u64,
         roommates: Map<Address, i128>,
@@ -73,6 +75,7 @@ impl RentEscrowContract {
 
         env.storage().persistent().set(&DataKey::Escrow, &RentEscrow {
             landlord,
+            token,
             rent_amount,
             roommates: roommate_states,
         });
@@ -131,6 +134,9 @@ impl RentEscrowContract {
             return Err(Error::Unauthorized);
         }
 
+        let token_client = token::TokenClient::new(&env, &escrow.token);
+        token_client.transfer(&from, &env.current_contract_address(), &amount);
+
         let mut state = escrow.roommates.get(from.clone()).unwrap();
         state.paid += amount;
         escrow.roommates.set(from.clone(), state);
@@ -167,12 +173,16 @@ impl RentEscrowContract {
 
     /// Release total rent to the landlord if fully funded.
     pub fn release(env: Env) -> Result<(), Error> {
-        if !Self::is_fully_funded(env.clone()) {
+        let escrow: RentEscrow = env.storage()
+            .persistent()
+            .get(&DataKey::Escrow)
+            .expect("escrow not initialized");
+        let token_client = token::TokenClient::new(&env, &escrow.token);
+        let balance = token_client.balance(&env.current_contract_address());
+        if balance < escrow.rent_amount {
             return Err(Error::InsufficientFunding);
         }
-
-        // TODO: Transfer collected rent tokens to escrow.landlord
-
+        token_client.transfer(&env.current_contract_address(), &escrow.landlord, &balance);
         Ok(())
     }
 

@@ -1,8 +1,6 @@
 name: Unit Tests
 
-name: Unit Tests
-
-        uses: actions/upload-artifact@v4
+on:
   push:
     branches:
       - main
@@ -12,48 +10,42 @@ name: Unit Tests
       - main
       - develop
 
-        with:
+jobs:
   test:
     name: Run Unit Tests
     runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: ./
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '24'
-      - name: Install dependencies (skip if missing)
-        run: |
-          if [ -f ./apps/web/package.json ]; then
-            cd ./apps/web
-            npm ci
-          else
-            echo "No ./apps/web/package.json found, skipping npm install."
-          fi
-      - name: Run Jest tests with coverage (skip if missing)
-        run: |
-          if [ -f ./apps/web/package.json ]; then
-            cd ./apps/web
-            npm run test:coverage -- --ci
-          else
-            echo "No ./apps/web/package.json found, skipping tests."
-          fi
-      - name: Upload coverage to Codecov (skip if missing)
-        if: ${{ exists('apps/web/coverage') }}
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: './package-lock.json'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Jest tests with coverage
+        run: npm run test:coverage -- --ci
+
+      - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          directory: ./apps/web/coverage
+          directory: ./coverage
           fail_ci_if_error: true
-      - name: Upload coverage report (skip if missing)
-        if: ${{ exists('apps/web/coverage') }}
+
+      - name: Upload coverage report
         uses: actions/upload-artifact@v4
         with:
           name: jest-coverage-report
-          path: ./apps/web/coverage/
+          path: ./coverage/
           retention-days: 7
-          name: jest-coverage-report
-          path: ./apps/web/coverage/
-          retention-days: 7
-
