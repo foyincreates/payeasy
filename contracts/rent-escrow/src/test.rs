@@ -3,6 +3,8 @@
 use super::*;
 use soroban_sdk::{testutils::Address as _, Env};
 
+const TEST_DEADLINE: u64 = 2_000_000_000_u64;
+
 fn setup_escrow(env: &Env) -> (RentEscrowContractClient<'_>, Address, Address, Address) {
     let contract_id = env.register(RentEscrowContract, ());
     let client = RentEscrowContractClient::new(env, &contract_id);
@@ -16,7 +18,7 @@ fn setup_escrow(env: &Env) -> (RentEscrowContractClient<'_>, Address, Address, A
     roommate_shares.set(roommate_b.clone(), 500_i128);
 
     env.mock_all_auths();
-    client.initialize(&landlord, &1000_i128, &86400_u64, &roommate_shares);
+    client.initialize(&landlord, &1000_i128, &TEST_DEADLINE, &roommate_shares);
 
     (client, landlord, roommate_a, roommate_b)
 }
@@ -44,6 +46,14 @@ fn test_initialize() {
 
         assert_eq!(escrow.landlord, landlord);
     });
+}
+
+#[test]
+fn test_get_deadline() {
+    let env = Env::default();
+    let (client, _, _, _) = setup_escrow(&env);
+
+    assert_eq!(client.get_deadline(), TEST_DEADLINE);
 }
 
 #[test]
