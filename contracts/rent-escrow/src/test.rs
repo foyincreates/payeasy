@@ -118,6 +118,26 @@ fn test_get_balance() {
 }
 
 #[test]
+fn test_individual_token_refund() {
+    let env = Env::default();
+    let (client, landlord, roommate_a, _, _, token) = setup_escrow(&env);
+
+    // Roommate contributes
+    client.contribute(&roommate_a, &400_i128);
+    assert_eq!(client.get_balance(&roommate_a), 400_i128);
+    assert_eq!(token.balance(&client.address), 400_i128);
+
+    let initial_roommate_balance = token.balance(&roommate_a);
+
+    // Landlord triggers individual refund — balance resets to zero, tokens returned
+    let refund_amount = client.refund(&roommate_a);
+    assert_eq!(refund_amount, 400_i128);
+    assert_eq!(client.get_balance(&roommate_a), 0_i128);
+    assert_eq!(token.balance(&client.address), 0_i128);
+    assert_eq!(token.balance(&roommate_a), initial_roommate_balance + 400_i128);
+}
+
+#[test]
 fn test_agreement_released_event() {
     let env = Env::default();
     let (client, _, roommate_a, roommate_b, _, _) = setup_escrow(&env);

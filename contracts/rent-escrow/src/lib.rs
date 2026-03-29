@@ -18,6 +18,8 @@ pub enum Error {
     Unauthorized = 3,
     /// Refunds are not available until the deadline has passed.
     DeadlineNotReached = 4,
+    /// No funds to refund for this roommate.
+    NothingToRefund = 5,
 }
 
 /// Storage key definitions for persistent contract state.
@@ -217,6 +219,33 @@ impl RentEscrowContract {
         });
 
         Ok(())
+    }
+
+    /// Landlord-initiated refund of a specific roommate's contributed tokens.
+    pub fn refund(env: Env, roommate: Address) -> Result<i128, Error> {
+        let landlord: Address = Self::get_landlord(env.clone());
+        landlord.require_auth();
+
+        let mut escrow: RentEscrow = env.storage()
+            .persistent()
+            .get(&DataKey::Escrow)
+            .expect("escrow not initialized");
+
+        let mut state = escrow.roommates.get(roommate.clone()).ok_or(Error::Unauthorized)?;
+        let refund_amount = state.paid;
+
+        if refund_amount <= 0 {
+            return Err(Error::NothingToRefund);
+        }
+
+        state.paid = 0;
+        escrow.roommates.set(roommate.clone(), state);
+        env.storage().persistent().set(&DataKey::Escrow, &escrow);
+
+        let token_client = token::Client::new(&env, &escrow.token_address);
+        token_client.transfer(&env.current_contract_address(), &roommate, &refund_amount);
+
+        Ok(refund_amount)
     }
 
     /// Retrieve the landlord address.
