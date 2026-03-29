@@ -9,6 +9,8 @@ jobs:
     name: Check Bundle Size
     runs-on: ubuntu-latest
 
+
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -30,7 +32,7 @@ jobs:
         with:
           node-version: "24"
           cache: "npm"
-          cache-dependency-path: ./package-lock.json
+          cache-dependency-path: ./apps/web/package-lock.json
 
       - name: Clean caches
         if: steps.web-exists.outputs.exists == 'true'
@@ -67,7 +69,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bundle-report
-          path: .next/bundle-report.json
+          path: apps/web/.next/bundle-report.json
           retention-days: 30
 
       - name: Skip bundle size check (no web app)

@@ -1,5 +1,5 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, contracterror, token, Address, Env, Map};
+use soroban_sdk::{contract, contractevent, contractimpl, contracttype, contracterror, token, Address, Env, Map};
 
 /// Minimum rent amount in stroops/token-units to prevent micro-escrow spam
 pub const MIN_RENT: i128 = 100;
@@ -53,6 +53,12 @@ pub struct RentEscrow {
     pub token_address: Address,
     pub rent_amount: i128,
     pub roommates: Map<Address, RoommateState>,
+}
+
+#[contractevent]
+#[derive(Clone, Default, Debug, Eq, PartialEq)]
+pub struct AgreementReleased {
+    pub amount: i128,
 }
 
 #[contract]
@@ -206,6 +212,10 @@ impl RentEscrowContract {
         let token_client = token::Client::new(&env, &escrow.token_address);
         token_client.transfer(&env.current_contract_address(), &escrow.landlord, &total_funded);
 
+        env.events().publish_event(&AgreementReleased {
+            amount: total_funded,
+        });
+
         Ok(())
     }
 
@@ -280,7 +290,7 @@ impl RentEscrowContract {
         let mut state = escrow.roommates.get(from.clone()).unwrap();
         let refund_amount = state.paid;
         state.paid = 0;
-        
+
         let mut updated_escrow = escrow.clone();
         updated_escrow.roommates.set(from.clone(), state);
         env.storage().persistent().set(&DataKey::Escrow, &updated_escrow);
