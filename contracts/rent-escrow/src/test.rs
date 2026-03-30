@@ -66,7 +66,7 @@ fn test_initialize() {
     roommate_shares.set(Address::generate(&env), 500);
 
     env.mock_all_auths();
-    client.initialize(&landlord, &1000_i128, &TEST_DEADLINE, &roommate_shares);
+
     client.initialize(
         &landlord,
         &token_address,
@@ -83,7 +83,7 @@ fn test_initialize() {
             .expect("escrow should be stored after initialize");
 
         assert_eq!(escrow.landlord, landlord);
-        assert_eq!(escrow.token_address, token_address);
+        assert_eq!(escrow.token, token_address);
     });
 }
 
@@ -352,4 +352,27 @@ fn test_contribute_emits_event() {
             300_i128.into_val(&env)
         )
     );
+}
+
+#[test]
+fn test_initialize_invalid_rent_amount() {
+    let env = Env::default();
+    let contract_id = env.register(RentEscrowContract, ());
+    let client = RentEscrowContractClient::new(&env, &contract_id);
+    let landlord = Address::generate(&env);
+    let token = Address::generate(&env);
+    let mut shares = Map::new(&env);
+    
+    env.mock_all_auths();
+
+    // Test with 0 rent
+    let result = client.try_initialize(&landlord, &token, &0, &TEST_DEADLINE, &shares);
+    assert_eq!(result.err(), Some(Ok(Error::InvalidAmount)));
+
+    // Test with MIN_RENT
+    let result = client.try_initialize(&landlord, &token, &MIN_RENT, &TEST_DEADLINE, &shares);
+    assert_eq!(result.err(), Some(Ok(Error::InvalidAmount)));
+
+    // Test with MIN_RENT + 1 (should succeed)
+    client.initialize(&landlord, &token, &(MIN_RENT + 1), &TEST_DEADLINE, &shares);
 }

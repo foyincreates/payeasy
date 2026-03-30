@@ -1,10 +1,10 @@
 "use client";
 
-import { useStellar } from "@/context/StellarContext";
+import { useStellarAuth } from "@/contexts/StellarAuthContext";
 
 /**
  * A custom hook to interact with the Freighter wallet.
- * This hook is a thin wrapper around the StellarContext.
+ * This hook is a thin wrapper around the StellarAuthContext.
  * 
  * Returns:
  * - publicKey: The Stellar public key of the connected account (or null).
@@ -22,7 +22,7 @@ export default function useFreighter() {
     disconnect,
     isConnecting,
     error
-  } = useStellar();
+  } = useStellarAuth();
 
   return {
     publicKey,
