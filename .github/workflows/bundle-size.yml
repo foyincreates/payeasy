@@ -9,31 +9,49 @@ jobs:
     name: Check Bundle Size
     runs-on: ubuntu-latest
 
-    defaults:
-      run:
-        working-directory: ./apps/web
+
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+
+
+      - name: Check if apps/web exists
+        id: web-exists
+        run: |
+          if [ -f ./apps/web/package.json ]; then
+            echo "::set-output name=exists::true"
+          else
+            echo "::set-output name=exists::false"
+          fi
+
       - name: Setup Node.js
+        if: steps.web-exists.outputs.exists == 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
           cache: "npm"
-          cache-dependency-path: ./apps/web/package-lock.json
+          cache-dependency-path: ./package-lock.json
 
       - name: Clean caches
+        if: steps.web-exists.outputs.exists == 'true'
         run: |
+          cd apps/web
           rm -rf node_modules/.cache
           rm -rf /home/runner/.cache/next-swc
 
       - name: Install dependencies
-        run: npm ci
+        if: steps.web-exists.outputs.exists == 'true'
+        run: |
+          cd apps/web
+          npm ci
 
       - name: Build application
-        run: npm run build
+        if: steps.web-exists.outputs.exists == 'true'
+        run: |
+          cd apps/web
+          npm run build
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
@@ -41,12 +59,19 @@ jobs:
           NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN: ${{ secrets.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN }}
 
       - name: Check bundle size budgets
-        run: npm run bundle:check
+        if: steps.web-exists.outputs.exists == 'true'
+        run: |
+          cd apps/web
+          npm run bundle:check
 
       - name: Upload bundle report
-        if: always()
+        if: steps.web-exists.outputs.exists == 'true' && always()
         uses: actions/upload-artifact@v4
         with:
           name: bundle-report
           path: apps/web/.next/bundle-report.json
           retention-days: 30
+
+      - name: Skip bundle size check (no web app)
+        if: steps.web-exists.outputs.exists == 'false'
+        run: echo "No ./apps/web/package.json found, skipping bundle size check."

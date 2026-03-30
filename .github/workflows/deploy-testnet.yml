@@ -1,0 +1,252 @@
+name: Deploy to Stellar Testnet
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to deploy (e.g. v1.2.0)"
+        required: false
+        default: ""
+      dry_run:
+        description: "Dry run — build only, skip deploy"
+        type: boolean
+        default: false
+
+concurrency:
+  group: deploy-testnet
+  cancel-in-progress: false  # never cancel an in-flight deploy
+
+# ─── Permissions ───────────────────────────────────────────────────────────────
+permissions:
+  contents: write       # post release comments / upload assets
+  actions: read
+
+# ─── Shared env ───────────────────────────────────────────────────────────────
+env:
+  CARGO_TERM_COLOR: always
+  CONTRACT_DIR: contracts/rent-escrow
+  WASM_PATH: contracts/rent-escrow/target/wasm32-unknown-unknown/release/rent_escrow.wasm
+  STELLAR_NETWORK: testnet
+  STELLAR_RPC_URL: https://soroban-testnet.stellar.org
+  STELLAR_NETWORK_PASSPHRASE: "Test SDF Network ; September 2015"
+
+jobs:
+  # ────────────────────────────────────────────────────────────────────────────
+  build:
+    name: Build WASM
+    runs-on: ubuntu-latest
+    outputs:
+      wasm-artifact: ${{ steps.meta.outputs.artifact-name }}
+      release-tag: ${{ steps.meta.outputs.release-tag }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      # Derive tag name regardless of trigger type
+      - name: Resolve release metadata
+        id: meta
+        run: |
+          if [[ "${{ github.event_name }}" == "release" ]]; then
+            TAG="${{ github.event.release.tag_name }}"
+          else
+            TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          fi
+          echo "release-tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "artifact-name=rent-escrow-wasm-${TAG}" >> $GITHUB_OUTPUT
+          echo "Deploying tag: ${TAG}"
+
+      - name: Install Rust + wasm32 target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: wasm32-unknown-unknown
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ${{ env.CONTRACT_DIR }}/target
+          key: ${{ runner.os }}-cargo-deploy-${{ hashFiles(format('{0}/Cargo.lock', env.CONTRACT_DIR)) }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-deploy-
+            ${{ runner.os }}-cargo-
+
+      - name: Build optimised WASM
+        run: |
+          cd ${{ env.CONTRACT_DIR }}
+          cargo build --target wasm32-unknown-unknown --release
+
+      - name: Verify WASM produced
+        run: |
+          if [[ ! -f "${{ env.WASM_PATH }}" ]]; then
+            echo "::error::WASM binary not found at ${{ env.WASM_PATH }}"
+            exit 1
+          fi
+          SIZE=$(du -sh "${{ env.WASM_PATH }}" | cut -f1)
+          echo "WASM size: ${SIZE}"
+
+      - name: Upload WASM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.meta.outputs.artifact-name }}
+          path: ${{ env.WASM_PATH }}
+          if-no-files-found: error
+          retention-days: 90
+
+  # ────────────────────────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy to Testnet
+    needs: build
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.dry_run != 'true' }}
+
+    outputs:
+      contract-id: ${{ steps.deploy.outputs.contract-id }}
+
+    steps:
+      - name: Download WASM artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build.outputs.wasm-artifact }}
+          path: ./wasm
+
+      - name: Install Stellar CLI
+        run: |
+          curl -fsSL https://github.com/stellar/stellar-cli/raw/main/install.sh | sh
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Verify Stellar CLI
+        run: stellar --version
+
+      # Write the deployer secret key to a temp identity file
+      - name: Configure deployer identity
+        env:
+          DEPLOYER_SECRET: ${{ secrets.TESTNET_DEPLOYER_SECRET }}
+        run: |
+          stellar keys add deployer --secret-key <<< "$DEPLOYER_SECRET"
+
+      - name: Deploy contract
+        id: deploy
+        env:
+          DEPLOYER_SECRET: ${{ secrets.TESTNET_DEPLOYER_SECRET }}
+        run: |
+          WASM_FILE=$(find ./wasm -name "*.wasm" | head -1)
+          echo "Deploying: ${WASM_FILE}"
+
+          CONTRACT_ID=$(stellar contract deploy \
+            --wasm "${WASM_FILE}" \
+            --source deployer \
+            --network ${{ env.STELLAR_NETWORK }} \
+            --rpc-url ${{ env.STELLAR_RPC_URL }} \
+            --network-passphrase "${{ env.STELLAR_NETWORK_PASSPHRASE }}")
+
+          echo "contract-id=${CONTRACT_ID}" >> $GITHUB_OUTPUT
+          echo "::notice::Contract deployed: ${CONTRACT_ID}"
+
+      - name: Save contract ID as artifact
+        run: |
+          mkdir -p ./deployment
+          cat <<EOF > ./deployment/contract-id.json
+          {
+            "contractId": "${{ steps.deploy.outputs.contract-id }}",
+            "network": "${{ env.STELLAR_NETWORK }}",
+            "tag": "${{ needs.build.outputs.release-tag }}",
+            "deployedAt": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+            "rpcUrl": "${{ env.STELLAR_RPC_URL }}"
+          }
+          EOF
+          cat ./deployment/contract-id.json
+
+      - name: Upload deployment artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-info-${{ needs.build.outputs.release-tag }}
+          path: ./deployment/contract-id.json
+          if-no-files-found: error
+          retention-days: 90
+
+  # ────────────────────────────────────────────────────────────────────────────
+  summarise:
+    name: Post Release Summary
+    needs: [build, deploy]
+    runs-on: ubuntu-latest
+    # Only comment on real GitHub release events (not manual dispatch)
+    if: ${{ github.event_name == 'release' && github.event.inputs.dry_run != 'true' }}
+
+    steps:
+      - name: Download deployment info
+        uses: actions/download-artifact@v4
+        with:
+          name: deployment-info-${{ needs.build.outputs.release-tag }}
+          path: ./deployment
+
+      - name: Download WASM for release asset
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build.outputs.wasm-artifact }}
+          path: ./wasm
+
+      # Attach WASM binary directly to the GitHub release
+      - name: Upload WASM to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.build.outputs.release-tag }}
+          files: ./wasm/*.wasm
+
+      # Post a structured comment on the release
+      - name: Post deployment comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const info = JSON.parse(fs.readFileSync('./deployment/contract-id.json', 'utf8'));
+
+            const body = [
+              '## ✅ Testnet Deployment',
+              '',
+              '| Field | Value |',
+              '|-------|-------|',
+              `| **Contract ID** | \`${info.contractId}\` |`,
+              `| **Network** | ${info.network} |`,
+              `| **Tag** | ${info.tag} |`,
+              `| **Deployed at** | ${info.deployedAt} |`,
+              `| **RPC URL** | ${info.rpcUrl} |`,
+              '',
+              '### Verify on Stellar Expert',
+              `[View contract](https://stellar.expert/explorer/testnet/contract/${info.contractId})`,
+              '',
+              '### Use in your frontend',
+              '```env',
+              `NEXT_PUBLIC_CONTRACT_ID=${info.contractId}`,
+              `NEXT_PUBLIC_STELLAR_NETWORK=testnet`,
+              '```',
+            ].join('\n');
+
+            await github.rest.repos.createReleaseAsset;
+
+            // Post as a release comment (reactions on the release body)
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.release.id,
+              body,
+            });
+
+            // Also set a step summary
+            await core.summary
+              .addHeading('Testnet Deployment Summary')
+              .addTable([
+                [{data: 'Field', header: true}, {data: 'Value', header: true}],
+                ['Contract ID', info.contractId],
+                ['Network', info.network],
+                ['Tag', info.tag],
+                ['Deployed At', info.deployedAt],
+              ])
+              .write();

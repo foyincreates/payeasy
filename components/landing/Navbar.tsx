@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Menu, X, Wallet } from "lucide-react";
+import { Menu, X } from "lucide-react";
 import Link from "next/link";
+import ConnectWalletButton from "@/components/wallet/ConnectWalletButton";
 
 export default function Navbar() {
   const [isScrolled, setIsScrolled] = useState(false);
@@ -57,10 +58,7 @@ export default function Navbar() {
           <a href="#" className="btn-secondary !py-2.5 !px-5 !text-sm !rounded-lg">
             Sign In
           </a>
-          <a href="#" className="btn-primary !py-2.5 !px-5 !text-sm !rounded-lg">
-            <Wallet size={16} />
-            Connect Wallet
-          </a>
+          <ConnectWalletButton />
         </div>
 
         {/* Mobile Menu Toggle */}
@@ -91,10 +89,9 @@ export default function Navbar() {
             <a href="#" className="btn-secondary !justify-center">
               Sign In
             </a>
-            <a href="#" className="btn-primary !justify-center">
-              <Wallet size={16} />
-              Connect Wallet
-            </a>
+            <div className="flex justify-center">
+              <ConnectWalletButton />
+            </div>
           </div>
         </div>
       )}

@@ -44,3 +44,6 @@ Thumbs.db
 
 #scripts
 scripts/
+test_snapshots/
+scripts/*
+!scripts/mint-test-tokens.sh

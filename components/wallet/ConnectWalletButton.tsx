@@ -1,0 +1,106 @@
+"use client";
+
+import React, { useState, useRef, useEffect } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Wallet, LogOut, Copy, Check, ChevronDown } from "lucide-react";
+import { useStellarAuth } from "@/context/StellarContext";
+
+export default function ConnectWalletButton() {
+  const { publicKey, isConnected, connect, disconnect, isConnecting } = useStellarAuth();
+  const [isOpen, setIsOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const truncatedKey = publicKey
+    ? `${publicKey.slice(0, 4)}...${publicKey.slice(-4)}`
+    : "";
+
+  const handleCopy = async () => {
+    if (publicKey) {
+      await navigator.clipboard.writeText(publicKey);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const handleDisconnect = () => {
+    disconnect();
+    setIsOpen(false);
+  };
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  if (!isConnected) {
+    return (
+      <button
+        onClick={connect}
+        disabled={isConnecting}
+        className="btn-primary !py-2.5 !px-5 !text-sm !rounded-lg flex items-center gap-2 group transition-all hover:scale-105 active:scale-95 disabled:opacity-50"
+      >
+        <Wallet size={16} className="group-hover:rotate-12 transition-transform" />
+        {isConnecting ? "Connecting..." : "Connect Wallet"}
+      </button>
+    );
+  }
+
+  return (
+    <div className="relative" ref={dropdownRef}>
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="glass-button flex items-center gap-2 px-4 py-2.5 rounded-lg border border-white/10 hover:bg-white/5 transition-all"
+      >
+        <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+        <span className="text-sm font-medium text-white font-mono">{truncatedKey}</span>
+        <ChevronDown 
+          size={16} 
+          className={`text-dark-400 transition-transform duration-300 ${isOpen ? "rotate-180" : ""}`} 
+        />
+      </button>
+
+      <AnimatePresence>
+        {isOpen && (
+          <motion.div
+            initial={{ opacity: 0, y: 10, scale: 0.95 }}
+            animate={{ opacity: 1, y: 5, scale: 1 }}
+            exit={{ opacity: 0, y: 10, scale: 0.95 }}
+            transition={{ duration: 0.2, ease: "easeOut" }}
+            className="absolute right-0 top-full z-50 w-48 mt-2 glass rounded-xl border border-white/10 shadow-2xl overflow-hidden"
+          >
+            <div className="p-1">
+              <button
+                onClick={handleCopy}
+                className="w-full flex items-center gap-3 px-3 py-2 text-sm text-dark-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
+              >
+                {copied ? (
+                  <Check size={16} className="text-emerald-500" />
+                ) : (
+                  <Copy size={16} />
+                )}
+                <span>{copied ? "Copied!" : "Copy Address"}</span>
+              </button>
+              
+              <div className="h-px bg-white/5 my-1" />
+              
+              <button
+                onClick={handleDisconnect}
+                className="w-full flex items-center gap-3 px-3 py-2 text-sm text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded-lg transition-colors"
+              >
+                <LogOut size={16} />
+                <span>Disconnect</span>
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
