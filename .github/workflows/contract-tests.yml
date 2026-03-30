@@ -10,23 +10,49 @@ on:
     branches: [ main ]
     paths:
       - 'contracts/rent-escrow/**'
+      - '.github/workflows/contract-tests.yml'
 
 jobs:
-  test:
+  build-and-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-      - name: Install Rust
+      - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
-          targets:wasm32-unknown-unknown
+          targets: wasm32-unknown-unknown
 
-      - name: Install Soroban CLI
-        run: cargo install --locked soroban-cli
+      - name: Cache Rust dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            contracts/rent-escrow/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('contracts/rent-escrow/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
 
-      - name: Run Tests
+      - name: Install Stellar CLI
+        run: |
+          curl -fsSL https://github.com/stellar/stellar-cli/raw/main/install.sh | sh
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Build WASM contract
+        run: |
+          cd contracts/rent-escrow
+          cargo build --target wasm32-unknown-unknown --release
+
+      - name: Run contract tests
         run: |
           cd contracts/rent-escrow
           cargo test --features testutils
+
+      - name: Upload WASM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rent-escrow-wasm
+          path: contracts/rent-escrow/target/wasm32-unknown-unknown/release/*.wasm
+          if-no-files-found: error
