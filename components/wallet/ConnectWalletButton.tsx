@@ -7,7 +7,7 @@ import { Wallet, LogOut, Copy, Check, ChevronDown, ExternalLink } from "lucide-r
 import { useStellarAuth } from "@/context/StellarContext";
 
 export default function ConnectWalletButton() {
-  const { publicKey, isConnected, connect, disconnect, isConnecting, isFreighterInstalled } = useStellarAuth();
+  const { publicKey, isConnected, connect, disconnect, isConnecting, isFreighterInstalled, isRestoring } = useStellarAuth();
   const [isOpen, setIsOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -40,6 +40,18 @@ export default function ConnectWalletButton() {
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  if (isRestoring) {
+    return (
+      <button
+        disabled
+        className="glass-button flex items-center gap-2 px-4 py-2.5 rounded-lg border border-white/10 opacity-70 cursor-not-allowed"
+      >
+        <div className="w-4 h-4 rounded-full border-2 border-white/20 border-t-white/80 animate-spin" />
+        <span className="text-sm font-medium text-white/70">Restoring session...</span>
+      </button>
+    );
+  }
 
   if (!isConnected) {
     return (

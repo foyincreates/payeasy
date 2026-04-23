@@ -13,6 +13,7 @@ interface StellarContextType {
   isConnected: boolean;
   isFreighterInstalled: boolean;
   isConnecting: boolean;
+  isRestoring: boolean;
   connect: () => Promise<void>;
   disconnect: () => void;
   error: string | null;
@@ -25,21 +26,32 @@ export function StellarProvider({ children }: { children: React.ReactNode }) {
   const [isConnected, setIsConnected] = useState(false);
   const [isFreighterInstalled, setIsFreighterInstalled] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
+  const [isRestoring, setIsRestoring] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // Initialize connection state
   useEffect(() => {
     async function init() {
-      const installed = await checkFreighter();
-      setIsFreighterInstalled(installed);
+      setIsRestoring(true);
+      try {
+        const installed = await checkFreighter();
+        setIsFreighterInstalled(installed);
 
-      if (installed) {
-        const connected = await checkConnection();
-        if (connected) {
-          const key = await fetchPublicKey();
-          setPublicKey(key);
-          setIsConnected(!!key);
+        if (installed) {
+          // Check if the site is allowed and the user is connected
+          const connected = await checkConnection();
+          if (connected) {
+            const key = await fetchPublicKey();
+            if (key) {
+              setPublicKey(key);
+              setIsConnected(true);
+            }
+          }
         }
+      } catch (err) {
+        console.error("Error restoring session:", err);
+      } finally {
+        setIsRestoring(false);
       }
     }
     init();
@@ -84,6 +96,7 @@ export function StellarProvider({ children }: { children: React.ReactNode }) {
         isConnected,
         isFreighterInstalled,
         isConnecting,
+        isRestoring,
         connect,
         disconnect,
         error,
