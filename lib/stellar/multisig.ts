@@ -1,33 +1,36 @@
 import {
   Account,
+  Asset,
+  BASE_FEE,
   Keypair,
+  Memo,
   Networks,
   Operation,
   Transaction,
   TransactionBuilder,
-  xdr,
 } from "@stellar/stellar-sdk";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+export type MultiSigRole = "landlord" | "roommate";
 
 export interface Signer {
   address: string;
-  role: "landlord" | "roommate";
+  role: MultiSigRole;
   weight: number;
 }
 
 export interface MultiSigConfig {
   escrowAccountId: string;
   signers: Signer[];
-  /** Sum of weights required to authorise a release */
   threshold: number;
   networkPassphrase: string;
+  requireLandlordApproval?: boolean;
+  roommateApprovalThreshold?: number;
 }
 
 export interface ApprovalState {
   signerAddress: string;
   approvedAt: Date;
-  txSignature: string;
+  signedTransactionXdr: string;
 }
 
 export interface EscrowReleaseRequest {
@@ -38,26 +41,164 @@ export interface EscrowReleaseRequest {
   config: MultiSigConfig;
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+export type WalletSignTransaction = (
+  xdr: string,
+  options: { network?: string; networkPassphrase: string }
+) => Promise<string | { signedTxXdr?: string; txXdr?: string; error?: unknown }>;
 
-/**
- * Returns the total weight accumulated from collected approvals.
- */
+export interface CreateLandlordMajorityConfigParams {
+  escrowAccountId: string;
+  landlordAddress: string;
+  roommateAddresses: string[];
+  networkPassphrase?: string;
+  roommateWeight?: number;
+  landlordWeight?: number;
+  threshold?: number;
+}
+
+export interface ApproveReleaseParams {
+  signerAddress: string;
+  transactionXdr: string;
+  config: MultiSigConfig;
+  signTransaction: WalletSignTransaction;
+  network?: string;
+  now?: Date;
+}
+
+export interface MultiSigSetupOptions {
+  masterWeight?: number;
+  lowThreshold?: number;
+  medThreshold?: number;
+  highThreshold?: number;
+}
+
+function uniqueByAddress(signers: Signer[]): Signer[] {
+  const seen = new Set<string>();
+  const result: Signer[] = [];
+
+  for (const signer of signers) {
+    if (seen.has(signer.address)) continue;
+    seen.add(signer.address);
+    result.push(signer);
+  }
+
+  return result;
+}
+
+function approvedAddressSet(approvals: ApprovalState[]): Set<string> {
+  return new Set(approvals.map((approval) => approval.signerAddress));
+}
+
+function normalizeSignedXdr(
+  response: Awaited<ReturnType<WalletSignTransaction>>
+): string {
+  if (typeof response === "string") {
+    return response;
+  }
+
+  if (response.error) {
+    throw new Error(String(response.error));
+  }
+
+  const signedXdr = response.signedTxXdr ?? response.txXdr;
+  if (!signedXdr) {
+    throw new Error("Wallet did not return a signed transaction XDR.");
+  }
+
+  return signedXdr;
+}
+
+function assertValidConfig(config: MultiSigConfig): void {
+  if (!config.escrowAccountId) {
+    throw new Error("Escrow account ID is required.");
+  }
+
+  if (!Number.isInteger(config.threshold) || config.threshold < 1) {
+    throw new Error("Multi-sig threshold must be a positive integer.");
+  }
+
+  if (config.signers.length === 0) {
+    throw new Error("At least one signer is required.");
+  }
+
+  const addresses = new Set<string>();
+  for (const signer of config.signers) {
+    if (!signer.address) {
+      throw new Error("Signer address is required.");
+    }
+
+    if (addresses.has(signer.address)) {
+      throw new Error(`Duplicate signer configured: ${signer.address}`);
+    }
+
+    if (!Number.isInteger(signer.weight) || signer.weight < 1) {
+      throw new Error(`Signer ${signer.address} must have a positive integer weight.`);
+    }
+
+    addresses.add(signer.address);
+  }
+
+  const totalWeight = config.signers.reduce((sum, signer) => sum + signer.weight, 0);
+  if (config.threshold > totalWeight) {
+    throw new Error("Multi-sig threshold cannot exceed total signer weight.");
+  }
+}
+
+export function roommateMajorityThreshold(roommateCount: number): number {
+  if (roommateCount <= 0) {
+    return 0;
+  }
+
+  return Math.floor(roommateCount / 2) + 1;
+}
+
+export function createLandlordMajorityConfig(
+  params: CreateLandlordMajorityConfigParams
+): MultiSigConfig {
+  const roommateWeight = params.roommateWeight ?? 1;
+  const roommateApprovalThreshold = roommateMajorityThreshold(
+    params.roommateAddresses.length
+  );
+  const landlordWeight =
+    params.landlordWeight ?? params.roommateAddresses.length * roommateWeight + 1;
+  const requiredThreshold =
+    landlordWeight + roommateApprovalThreshold * roommateWeight;
+
+  const config: MultiSigConfig = {
+    escrowAccountId: params.escrowAccountId,
+    networkPassphrase: params.networkPassphrase ?? Networks.TESTNET,
+    threshold: params.threshold ?? requiredThreshold,
+    requireLandlordApproval: true,
+    roommateApprovalThreshold,
+    signers: [
+      {
+        address: params.landlordAddress,
+        role: "landlord",
+        weight: landlordWeight,
+      },
+      ...params.roommateAddresses.map((address) => ({
+        address,
+        role: "roommate" as const,
+        weight: roommateWeight,
+      })),
+    ],
+  };
+
+  assertValidConfig(config);
+  return config;
+}
+
 export function accumulatedWeight(
   approvals: ApprovalState[],
   config: MultiSigConfig
 ): number {
-  return approvals.reduce((acc, approval) => {
-    const signer = config.signers.find(
-      (s) => s.address === approval.signerAddress
-    );
-    return acc + (signer?.weight ?? 0);
+  const approved = approvedAddressSet(approvals);
+
+  return uniqueByAddress(config.signers).reduce((sum, signer) => {
+    return sum + (approved.has(signer.address) ? signer.weight : 0);
   }, 0);
 }
 
-/**
- * Returns true when collected approvals satisfy the configured threshold.
- */
 export function isThresholdMet(
   approvals: ApprovalState[],
   config: MultiSigConfig
@@ -65,23 +206,139 @@ export function isThresholdMet(
   return accumulatedWeight(approvals, config) >= config.threshold;
 }
 
-/**
- * Returns signers who haven't approved yet.
- */
+export function approvedRoommateCount(
+  approvals: ApprovalState[],
+  config: MultiSigConfig
+): number {
+  const approved = approvedAddressSet(approvals);
+  return config.signers.filter(
+    (signer) => signer.role === "roommate" && approved.has(signer.address)
+  ).length;
+}
+
+export function hasLandlordApproval(
+  approvals: ApprovalState[],
+  config: MultiSigConfig
+): boolean {
+  const approved = approvedAddressSet(approvals);
+  return config.signers.some(
+    (signer) => signer.role === "landlord" && approved.has(signer.address)
+  );
+}
+
+export function requiredRoommateApprovals(config: MultiSigConfig): number {
+  if (typeof config.roommateApprovalThreshold === "number") {
+    return config.roommateApprovalThreshold;
+  }
+
+  const roommateCount = config.signers.filter(
+    (signer) => signer.role === "roommate"
+  ).length;
+  return roommateMajorityThreshold(roommateCount);
+}
+
+export function isReleaseApproved(
+  approvals: ApprovalState[],
+  config: MultiSigConfig
+): boolean {
+  const landlordSatisfied =
+    config.requireLandlordApproval === false || hasLandlordApproval(approvals, config);
+  const roommateSatisfied =
+    approvedRoommateCount(approvals, config) >= requiredRoommateApprovals(config);
+
+  return landlordSatisfied && roommateSatisfied && isThresholdMet(approvals, config);
+}
+
 export function pendingSigners(
   approvals: ApprovalState[],
   config: MultiSigConfig
 ): Signer[] {
-  const approved = new Set(approvals.map((a) => a.signerAddress));
-  return config.signers.filter((s) => !approved.has(s.address));
+  const approved = approvedAddressSet(approvals);
+  return config.signers.filter((signer) => !approved.has(signer.address));
 }
 
-// ─── Transaction helpers ───────────────────────────────────────────────────
+export async function approveRelease(
+  params: ApproveReleaseParams
+): Promise<ApprovalState> {
+  const signer = params.config.signers.find(
+    (candidate) => candidate.address === params.signerAddress
+  );
 
-/**
- * Build an unsigned payment transaction for the escrow release.
- * Each signer adds their own signature independently.
- */
+  if (!signer) {
+    throw new Error("Connected wallet is not a configured release signer.");
+  }
+
+  const signedResponse = await params.signTransaction(params.transactionXdr, {
+    network: params.network,
+    networkPassphrase: params.config.networkPassphrase,
+  });
+
+  return {
+    signerAddress: signer.address,
+    approvedAt: params.now ?? new Date(),
+    signedTransactionXdr: normalizeSignedXdr(signedResponse),
+  };
+}
+
+export function mergeSignatures(
+  envelopes: string[],
+  networkPassphrase: string = Networks.TESTNET
+): string {
+  if (envelopes.length === 0) {
+    throw new Error("No signed envelopes to merge.");
+  }
+
+  const transactions = envelopes.map((envelope) =>
+    TransactionBuilder.fromXDR(envelope, networkPassphrase)
+  );
+
+  const [first, ...rest] = transactions;
+  if (!(first instanceof Transaction)) {
+    throw new Error("Fee-bump transactions are not supported for multi-sig merging.");
+  }
+
+  const expectedHash = first.hash().toString("hex");
+
+  for (const transaction of rest) {
+    if (!(transaction instanceof Transaction)) {
+      throw new Error("Fee-bump transactions are not supported for multi-sig merging.");
+    }
+
+    const hash = transaction.hash().toString("hex");
+    if (hash !== expectedHash) {
+      throw new Error("Cannot merge signatures from different transactions.");
+    }
+
+    for (const signature of transaction.signatures) {
+      const duplicate = first.signatures.some(
+        (existing) =>
+          existing.hint().toString("hex") === signature.hint().toString("hex") &&
+          existing.signature().toString("hex") === signature.signature().toString("hex")
+      );
+
+      if (!duplicate) {
+        first.signatures.push(signature);
+      }
+    }
+  }
+
+  return first.toEnvelope().toXDR("base64");
+}
+
+export function mergeApprovalSignatures(
+  approvals: ApprovalState[],
+  config: MultiSigConfig
+): string {
+  if (!isReleaseApproved(approvals, config)) {
+    throw new Error("Release approval threshold has not been met.");
+  }
+
+  return mergeSignatures(
+    approvals.map((approval) => approval.signedTransactionXdr),
+    config.networkPassphrase
+  );
+}
+
 export async function buildReleaseTransaction(
   params: {
     sourceAccount: Account;
@@ -93,88 +350,44 @@ export async function buildReleaseTransaction(
   config: MultiSigConfig
 ): Promise<Transaction> {
   const { sourceAccount, destination, amount, asset = "native", memo } = params;
-
-  const op =
-    asset === "native"
-      ? Operation.payment({
-          destination,
-          asset: { code: "XLM", issuer: "" } as any, // native XLM
-          amount,
-        })
-      : Operation.payment({
-          destination,
-          asset: { code: asset.code, issuer: asset.issuer } as any,
-          amount,
-        });
+  const paymentAsset =
+    asset === "native" ? Asset.native() : new Asset(asset.code, asset.issuer);
 
   let builder = new TransactionBuilder(sourceAccount, {
-    fee: "1000",
+    fee: BASE_FEE,
     networkPassphrase: config.networkPassphrase,
-  })
-    .addOperation(op)
-    .setTimeout(300); // 5-min window
+  }).addOperation(
+    Operation.payment({
+      destination,
+      asset: paymentAsset,
+      amount,
+    })
+  );
 
-  if (memo) builder = builder.addMemo({ value: memo } as any);
+  if (memo) {
+    builder = builder.addMemo(Memo.text(memo));
+  }
 
-  return builder.build();
+  return builder.setTimeout(300).build();
 }
 
-/**
- * Apply a signer's keypair signature to a transaction (returns new tx envelope).
- */
 export function applySignature(tx: Transaction, keypair: Keypair): Transaction {
   tx.sign(keypair);
   return tx;
 }
 
-/**
- * Merge multiple partially-signed transaction envelopes into one.
- * All envelopes must be for the same transaction hash.
- */
-export function mergeSignatures(envelopes: string[]): string {
-  if (envelopes.length === 0) throw new Error("No envelopes to merge");
-
-  const [first, ...rest] = envelopes.map((e) =>
-    new Transaction(e, Networks.TESTNET)
-  );
-
-  for (const tx of rest) {
-    for (const sig of tx.signatures) {
-      const alreadyPresent = first.signatures.some(
-        (s) => s.signature().toString("hex") === sig.signature().toString("hex")
-      );
-      if (!alreadyPresent) first.signatures.push(sig);
-    }
-  }
-
-  return first.toEnvelope().toXDR("base64");
-}
-
-// ─── On-chain multi-sig configuration ─────────────────────────────────────
-
-/**
- * Build a transaction that configures the escrow account's signers & thresholds.
- * Should be submitted once when the escrow is created.
- */
 export function buildMultiSigSetupTransaction(
   sourceAccount: Account,
-  config: MultiSigConfig
+  config: MultiSigConfig,
+  options: MultiSigSetupOptions = {}
 ): Transaction {
+  assertValidConfig(config);
+
   let builder = new TransactionBuilder(sourceAccount, {
-    fee: "1000",
+    fee: BASE_FEE,
     networkPassphrase: config.networkPassphrase,
   });
 
-  // Set thresholds: low/med/high all require the same weight
-  builder = builder.addOperation(
-    Operation.setOptions({
-      lowThreshold: config.threshold,
-      medThreshold: config.threshold,
-      highThreshold: config.threshold,
-    })
-  );
-
-  // Add each signer with their configured weight
   for (const signer of config.signers) {
     builder = builder.addOperation(
       Operation.setOptions({
@@ -186,30 +399,43 @@ export function buildMultiSigSetupTransaction(
     );
   }
 
+  builder = builder.addOperation(
+    Operation.setOptions({
+      masterWeight: options.masterWeight ?? 0,
+      lowThreshold: options.lowThreshold ?? config.threshold,
+      medThreshold: options.medThreshold ?? config.threshold,
+      highThreshold: options.highThreshold ?? config.threshold,
+    })
+  );
+
   return builder.setTimeout(300).build();
 }
 
-// ─── Mock helpers (for tests) ─────────────────────────────────────────────
-
-export function mockApproval(signerAddress: string): ApprovalState {
+export function mockApproval(
+  signerAddress: string,
+  signedTransactionXdr = `mock-signed-xdr:${signerAddress}:${Date.now()}`
+): ApprovalState {
   return {
     signerAddress,
     approvedAt: new Date(),
-    txSignature: Buffer.from(
-      Array.from({ length: 64 }, () => Math.floor(Math.random() * 256))
-    ).toString("hex"),
+    signedTransactionXdr,
   };
 }
 
-export function defaultTestConfig(overrides?: Partial<MultiSigConfig>): MultiSigConfig {
+export function defaultTestConfig(
+  overrides?: Partial<MultiSigConfig>
+): MultiSigConfig {
   return {
-    escrowAccountId: "GABC...TEST",
-    threshold: 3,
+    escrowAccountId: "GESCROWACCOUNT",
+    threshold: 6,
     networkPassphrase: Networks.TESTNET,
+    requireLandlordApproval: true,
+    roommateApprovalThreshold: 2,
     signers: [
-      { address: "GLANDLORD111", role: "landlord", weight: 2 },
+      { address: "GLANDLORD111", role: "landlord", weight: 4 },
       { address: "GROOMMATE111", role: "roommate", weight: 1 },
       { address: "GROOMMATE222", role: "roommate", weight: 1 },
+      { address: "GROOMMATE333", role: "roommate", weight: 1 },
     ],
     ...overrides,
   };

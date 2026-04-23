@@ -1,52 +1,71 @@
 /**
- * lib/stellar/actions/claimRefund.ts
+ * Frontend action for calling the escrow refund method after deadline expiry.
  *
- * Frontend action for calling the `claim_refund` Soroban contract function.
- * Checks deadline expiry, builds + signs the transaction via Freighter,
- * submits to the network, and returns a structured confirmation.
+ * This action:
+ *  1. Resolves the on-chain deadline from the contract unless the caller
+ *     provides a trusted cached deadline.
+ *  2. Checks that the latest ledger close time is past the deadline.
+ *  3. Reads the roommate's refundable balance before submission so the UI can
+ *     show the refunded amount even if the contract method returns void.
+ *  4. Builds, signs, submits, and confirms the Soroban transaction.
  */
 
 import {
+  Account,
+  Address,
+  BASE_FEE,
   Contract,
   Networks,
-  rpc,
   TransactionBuilder,
-  nativeToScVal,
+  rpc,
   scValToNative,
   xdr,
-  BASE_FEE,
-  Address,
 } from "@stellar/stellar-sdk";
-import { getAddress, signTransaction } from "@stellar/freighter-api";
-
-// ─── Constants ────────────────────────────────────────────────────────────────
 
 export const NETWORK_PASSPHRASE = Networks.TESTNET;
 export const RPC_URL = "https://soroban-testnet.stellar.org";
-
-// ─── Types ────────────────────────────────────────────────────────────────────
+const DEFAULT_TIMEOUT_SECONDS = 300;
+const MAX_CONFIRMATION_RETRIES = 20;
+const CONFIRMATION_DELAY_MS = 1500;
+const REFUND_METHOD_CANDIDATES = ["claim_refund", "reclaim_deposit"] as const;
 
 export interface ClaimRefundParams {
   /** Deployed contract address (C...) */
   contractId: string;
-  /** Roommate's Stellar public key — must match escrow record */
+  /** Roommate's Stellar public key */
   roommateAddress: string;
-  /** Unix timestamp (seconds) of the escrow deadline */
-  deadlineTimestamp: number;
+  /**
+   * Optional trusted deadline timestamp already fetched from the contract.
+   * When omitted, the action reads `get_deadline()` from the contract directly.
+   */
+  deadlineTimestamp?: number;
+  /**
+   * Optional trusted refundable balance already fetched from the contract.
+   * When omitted, the action reads `get_balance(roommate)` from the contract directly.
+   */
+  refundableAmount?: string;
 }
 
 export interface ClaimRefundResult {
   txHash: string;
-  refundedAmount: string; // in stroops as string
+  refundedAmount: string;
   roommateAddress: string;
   confirmedAt: Date;
+  refundedAtLedger: number;
+  method: RefundMethodName;
 }
 
 export class DeadlineNotExpiredError extends Error {
+  readonly deadlineTimestamp: number;
+
   constructor(deadlineTimestamp: number) {
-    const deadline = new Date(deadlineTimestamp * 1000).toISOString();
-    super(`Deadline has not passed yet. Refund available after: ${deadline}`);
+    super(
+      `Deadline has not passed yet. Refund available after ${new Date(
+        deadlineTimestamp * 1000
+      ).toISOString()}`
+    );
     this.name = "DeadlineNotExpiredError";
+    this.deadlineTimestamp = deadlineTimestamp;
   }
 }
 
@@ -57,153 +76,404 @@ export class FreighterNotAvailableError extends Error {
   }
 }
 
-// ─── Deadline guard ───────────────────────────────────────────────────────────
+export class NoRefundAvailableError extends Error {
+  constructor(roommateAddress: string) {
+    super(`No refundable balance found for roommate ${roommateAddress}.`);
+    this.name = "NoRefundAvailableError";
+  }
+}
 
-/**
- * Throws DeadlineNotExpiredError if the current time is before the deadline.
- * Uses the ledger's close time for on-chain accuracy if rpcUrl is provided,
- * otherwise falls back to local clock (fine for UI pre-checks).
- */
+export class RefundMethodResolutionError extends Error {
+  constructor() {
+    super("Unable to resolve a supported refund method on the escrow contract.");
+    this.name = "RefundMethodResolutionError";
+  }
+}
+
+export type RefundMethodName = (typeof REFUND_METHOD_CANDIDATES)[number];
+
+export interface FreighterAddressResponse {
+  address: string;
+  error?: unknown;
+}
+
+export interface FreighterSignResponse {
+  signedTxXdr?: string;
+  txXdr?: string;
+  error?: unknown;
+}
+
+export interface FreighterClient {
+  getAddress: () => Promise<FreighterAddressResponse>;
+  signTransaction: (
+    transactionXdr: string,
+    options?: { networkPassphrase?: string; address?: string }
+  ) => Promise<FreighterSignResponse>;
+}
+
+export interface ClaimRefundDependencies {
+  server?: rpc.Server;
+  freighter?: FreighterClient;
+  networkPassphrase?: string;
+  rpcUrl?: string;
+  sleep?: (ms: number) => Promise<void>;
+  refundMethodCandidates?: readonly RefundMethodName[];
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function loadFreighterClient(): Promise<FreighterClient> {
+  if (typeof window === "undefined" || !(window as Window & { freighter?: unknown }).freighter) {
+    throw new FreighterNotAvailableError();
+  }
+
+  const freighterModule = await import("@stellar/freighter-api");
+  const freighter = "default" in freighterModule ? freighterModule.default : freighterModule;
+
+  return {
+    getAddress: freighter.getAddress,
+    signTransaction: freighter.signTransaction,
+  };
+}
+
+function getServer(deps: ClaimRefundDependencies): rpc.Server {
+  return deps.server ?? new rpc.Server(deps.rpcUrl ?? RPC_URL);
+}
+
+function getNetworkPassphrase(deps: ClaimRefundDependencies): string {
+  return deps.networkPassphrase ?? NETWORK_PASSPHRASE;
+}
+
+async function getSourceAccount(
+  server: rpc.Server,
+  address: string
+): Promise<Account> {
+  return server
+    .getAccount(address)
+    .catch(() => new Account(address, "0"));
+}
+
+function getSimulationReturnValue(
+  simulation: rpc.Api.SimulateTransactionResponse
+): unknown {
+  const simulationShape = simulation as {
+    result?: { retval?: unknown };
+    results?: Array<{ retval?: unknown }>;
+  };
+  const resultRetval = simulationShape.result?.retval;
+  const resultsRetval = simulationShape.results?.[0]?.retval;
+
+  return resultRetval ?? resultsRetval;
+}
+
+function parseIntegerString(value: unknown, label: string): string {
+  if (typeof value === "bigint") {
+    return value.toString();
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.trunc(value).toString();
+  }
+
+  if (typeof value === "string" && value.length > 0) {
+    return value;
+  }
+
+  if (value && typeof value === "object") {
+    const maybeValue = value as Record<string, unknown>;
+
+    for (const key of ["i128", "u64", "value"]) {
+      const nested = maybeValue[key];
+      if (typeof nested === "bigint") return nested.toString();
+      if (typeof nested === "number" && Number.isFinite(nested)) {
+        return Math.trunc(nested).toString();
+      }
+      if (typeof nested === "string" && nested.length > 0) {
+        return nested;
+      }
+    }
+  }
+
+  throw new Error(`Unable to parse ${label} from contract response.`);
+}
+
+async function simulateReadOnly(
+  server: rpc.Server,
+  contractId: string,
+  sourceAddress: string,
+  method: string,
+  args: xdr.ScVal[] = [],
+  networkPassphrase: string = NETWORK_PASSPHRASE
+): Promise<unknown> {
+  const sourceAccount = await getSourceAccount(server, sourceAddress);
+  const contract = new Contract(contractId);
+  const transaction = new TransactionBuilder(sourceAccount, {
+    fee: BASE_FEE,
+    networkPassphrase,
+  })
+    .addOperation(contract.call(method, ...args))
+    .setTimeout(DEFAULT_TIMEOUT_SECONDS)
+    .build();
+
+  const simulation = await server.simulateTransaction(transaction);
+
+  if (rpc.Api.isSimulationError(simulation)) {
+    throw new Error(`Simulation failed for ${method}: ${simulation.error}`);
+  }
+
+  return getSimulationReturnValue(simulation);
+}
+
+export async function getContractDeadline(
+  contractId: string,
+  roommateAddress: string,
+  deps: ClaimRefundDependencies = {}
+): Promise<number> {
+  const retval = await simulateReadOnly(
+    getServer(deps),
+    contractId,
+    roommateAddress,
+    "get_deadline",
+    [],
+    getNetworkPassphrase(deps)
+  );
+
+  return Number.parseInt(parseIntegerString(scValToNative(retval as never), "deadline"), 10);
+}
+
+export async function getRefundableBalance(
+  contractId: string,
+  roommateAddress: string,
+  deps: ClaimRefundDependencies = {}
+): Promise<string> {
+  const retval = await simulateReadOnly(
+    getServer(deps),
+    contractId,
+    roommateAddress,
+    "get_balance",
+    [Address.fromString(roommateAddress).toScVal()],
+    getNetworkPassphrase(deps)
+  );
+
+  return parseIntegerString(scValToNative(retval as never), "refundable balance");
+}
+
 export async function assertDeadlineExpired(
   deadlineTimestamp: number,
-  rpcUrl = RPC_URL
+  deps: ClaimRefundDependencies = {}
 ): Promise<void> {
-  let nowSeconds: number;
-
-  try {
-    const server = new rpc.Server(rpcUrl);
-    const latestLedger = await server.getLatestLedger();
-    // Stellar ledgers close ~every 5 s; closeTime is a unix timestamp
-    nowSeconds = (latestLedger as any).closeTime ?? Math.floor(Date.now() / 1000);
-  } catch {
-    // Fallback to local clock if RPC is unreachable
-    nowSeconds = Math.floor(Date.now() / 1000);
-  }
+  const latestLedger = await getServer(deps).getLatestLedger();
+  const ledgerTimestampSource = latestLedger as {
+    closeTime?: string | number;
+    latestLedgerCloseTime?: string | number;
+  };
+  const nowSeconds = Number.parseInt(
+    String(
+      ledgerTimestampSource.closeTime ?? ledgerTimestampSource.latestLedgerCloseTime
+    ),
+    10
+  );
 
   if (nowSeconds < deadlineTimestamp) {
     throw new DeadlineNotExpiredError(deadlineTimestamp);
   }
 }
 
-// ─── Core action ─────────────────────────────────────────────────────────────
+async function resolveRefundMethod(
+  contractId: string,
+  roommateAddress: string,
+  deps: ClaimRefundDependencies
+): Promise<RefundMethodName> {
+  const candidates = deps.refundMethodCandidates ?? REFUND_METHOD_CANDIDATES;
+  const server = getServer(deps);
+  const networkPassphrase = getNetworkPassphrase(deps);
+  const roommateArg = Address.fromString(roommateAddress).toScVal();
 
-/**
- * Full claim-refund flow:
- *  1. Assert deadline has passed
- *  2. Resolve Freighter public key (or use provided roommateAddress)
- *  3. Build Soroban invoke transaction
- *  4. Simulate to get resource estimates
- *  5. Sign via Freighter
- *  6. Submit and await confirmation
- *  7. Return parsed result
- */
-export async function claimRefund(
-  params: ClaimRefundParams
-): Promise<ClaimRefundResult> {
-  const { contractId, roommateAddress, deadlineTimestamp } = params;
+  for (const method of candidates) {
+    try {
+      await simulateReadOnly(
+        server,
+        contractId,
+        roommateAddress,
+        method,
+        [roommateArg],
+        networkPassphrase
+      );
+      return method;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
 
-  // ── 1. Deadline check ────────────────────────────────────────────────────
-  await assertDeadlineExpired(deadlineTimestamp);
+      if (
+        message.includes("function does not exist") ||
+        message.includes("unknown function") ||
+        message.includes("method not found") ||
+        message.includes("MissingValue")
+      ) {
+        continue;
+      }
 
-  // ── 2. Freighter guard ───────────────────────────────────────────────────
-  if (typeof window === "undefined" || !(window as any).freighter) {
-    throw new FreighterNotAvailableError();
+      return method;
+    }
   }
 
-  // Validate the connected wallet matches the expected roommate
-  const { address: connectedKey } = await getAddress();
-  if (connectedKey !== roommateAddress) {
+  throw new RefundMethodResolutionError();
+}
+
+function normalizeSignedTransactionXdr(result: FreighterSignResponse): string {
+  const signedXdr = result.signedTxXdr ?? result.txXdr;
+
+  if (typeof signedXdr !== "string" || signedXdr.length === 0) {
     throw new Error(
-      `Connected wallet (${connectedKey.slice(0, 6)}…) does not match ` +
-        `expected roommate (${roommateAddress.slice(0, 6)}…). ` +
-        `Switch accounts in Freighter.`
+      result.error
+        ? `Failed to sign transaction with Freighter: ${String(result.error)}`
+        : "Freighter did not return a signed transaction XDR."
     );
   }
 
-  // ── 3. Build transaction ─────────────────────────────────────────────────
-  const server = new rpc.Server(RPC_URL);
-  const account = await server.getAccount(roommateAddress);
+  return signedXdr;
+}
 
-  const contract = new Contract(contractId);
-  const roommateScVal = new Address(roommateAddress).toScVal();
+export async function claimRefund(
+  params: ClaimRefundParams,
+  deps: ClaimRefundDependencies = {}
+): Promise<ClaimRefundResult> {
+  const server = getServer(deps);
+  const networkPassphrase = getNetworkPassphrase(deps);
+  const freighter = deps.freighter ?? (await loadFreighterClient());
+  const {
+    contractId,
+    roommateAddress,
+    deadlineTimestamp: providedDeadline,
+    refundableAmount: providedRefundableAmount,
+  } = params;
 
-  const tx = new TransactionBuilder(account, {
-    fee: BASE_FEE,
-    networkPassphrase: NETWORK_PASSPHRASE,
-  })
-    .addOperation(contract.call("claim_refund", roommateScVal))
-    .setTimeout(300)
-    .build();
+  const deadlineTimestamp =
+    providedDeadline ??
+    (await getContractDeadline(contractId, roommateAddress, {
+      ...deps,
+      server,
+      networkPassphrase,
+    }));
 
-  // ── 4. Simulate (get resource fees + footprint) ──────────────────────────
-  const simResult = await server.simulateTransaction(tx);
-
-  if (rpc.Api.isSimulationError(simResult)) {
-    throw new Error(`Simulation failed: ${simResult.error}`);
-  }
-
-  const preparedTx = rpc.assembleTransaction(tx, simResult).build();
-
-  // ── 5. Sign via Freighter ────────────────────────────────────────────────
-  const { signedTxXdr } = await signTransaction(preparedTx.toXDR(), {
-    networkPassphrase: NETWORK_PASSPHRASE,
+  await assertDeadlineExpired(deadlineTimestamp, {
+    ...deps,
+    server,
+    networkPassphrase,
   });
 
-  // ── 6. Submit ────────────────────────────────────────────────────────────
+  const refundableAmount =
+    providedRefundableAmount ??
+    (await getRefundableBalance(contractId, roommateAddress, {
+      ...deps,
+      server,
+      networkPassphrase,
+    }));
+
+  if (BigInt(refundableAmount) <= BigInt(0)) {
+    throw new NoRefundAvailableError(roommateAddress);
+  }
+
+  const connectedAddressResult = await freighter.getAddress();
+  if (connectedAddressResult.error) {
+    throw new Error(
+      `Failed to read connected wallet from Freighter: ${String(
+        connectedAddressResult.error
+      )}`
+    );
+  }
+
+  const connectedAddress = connectedAddressResult.address;
+  if (connectedAddress !== roommateAddress) {
+    throw new Error(
+      `Connected wallet (${connectedAddress.slice(0, 6)}...) does not match expected roommate (${roommateAddress.slice(0, 6)}...).`
+    );
+  }
+
+  const sourceAccount = await getSourceAccount(server, roommateAddress);
+  const contract = new Contract(contractId);
+  const refundMethod = await resolveRefundMethod(contractId, roommateAddress, {
+    ...deps,
+    server,
+    networkPassphrase,
+  });
+
+  const transaction = new TransactionBuilder(sourceAccount, {
+    fee: BASE_FEE,
+    networkPassphrase,
+  })
+    .addOperation(
+      contract.call(refundMethod, Address.fromString(roommateAddress).toScVal())
+    )
+    .setTimeout(DEFAULT_TIMEOUT_SECONDS)
+    .build();
+
+  const simulation = await server.simulateTransaction(transaction);
+  if (rpc.Api.isSimulationError(simulation)) {
+    throw new Error(`Simulation failed: ${simulation.error}`);
+  }
+
+  const preparedTransaction = rpc.assembleTransaction(transaction, simulation).build();
+  const signedResponse = await freighter.signTransaction(preparedTransaction.toXDR(), {
+    address: roommateAddress,
+    networkPassphrase,
+  });
+  const signedTxXdr = normalizeSignedTransactionXdr(signedResponse);
+
   const sendResult = await server.sendTransaction(
-    TransactionBuilder.fromXDR(signedTxXdr, NETWORK_PASSPHRASE)
+    TransactionBuilder.fromXDR(signedTxXdr, networkPassphrase)
   );
 
   if (sendResult.status === "ERROR") {
     throw new Error(
-      `Transaction submission failed: ${JSON.stringify(sendResult.errorResult)}`
+      `Transaction submission failed: ${JSON.stringify(
+        sendResult.errorResult ?? sendResult
+      )}`
     );
   }
 
-  // Poll for confirmation
-  const txHash = sendResult.hash;
-  let getResult = await server.getTransaction(txHash);
-
-  const MAX_RETRIES = 20;
+  const wait = deps.sleep ?? sleep;
+  let transactionResult = await server.getTransaction(sendResult.hash);
   let retries = 0;
 
   while (
-    getResult.status === rpc.Api.GetTransactionStatus.NOT_FOUND &&
-    retries < MAX_RETRIES
+    transactionResult.status === rpc.Api.GetTransactionStatus.NOT_FOUND &&
+    retries < MAX_CONFIRMATION_RETRIES
   ) {
-    await new Promise((r) => setTimeout(r, 1500));
-    getResult = await server.getTransaction(txHash);
-    retries++;
+    await wait(CONFIRMATION_DELAY_MS);
+    transactionResult = await server.getTransaction(sendResult.hash);
+    retries += 1;
   }
 
-  if (getResult.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
+  if (transactionResult.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
     throw new Error(
-      `Transaction did not succeed. Status: ${getResult.status}`
+      `Transaction did not succeed. Status: ${transactionResult.status}`
     );
   }
 
-  // ── 7. Parse return value ────────────────────────────────────────────────
-  // Contract returns the refunded amount as i128
-  const returnVal = getResult.returnValue;
-  const refundedAmount: bigint = returnVal
-    ? (scValToNative(returnVal) as bigint)
-    : BigInt(0);
+  const onChainReturnValue = transactionResult.returnValue
+    ? parseIntegerString(
+        scValToNative(transactionResult.returnValue),
+        "refunded amount"
+      )
+    : refundableAmount;
 
   return {
-    txHash,
-    refundedAmount: refundedAmount.toString(),
+    txHash: sendResult.hash,
+    refundedAmount: onChainReturnValue,
     roommateAddress,
-    confirmedAt: new Date(),
+    confirmedAt: new Date(transactionResult.createdAt * 1000),
+    refundedAtLedger: transactionResult.ledger,
+    method: refundMethod,
   };
 }
 
-// ─── Utility: human-readable amount ──────────────────────────────────────────
-
-/** Convert stroops string → XLM string (7 decimal places) */
 export function stroopsToXlm(stroops: string): string {
-  const n = BigInt(stroops);
+  const amount = BigInt(stroops);
   const divisor = BigInt(10_000_000);
-  const whole = n / divisor;
-  const frac = n % divisor;
-  return `${whole}.${frac.toString().padStart(7, "0")}`;
+  const whole = amount / divisor;
+  const fraction = amount % divisor;
+
+  return `${whole}.${fraction.toString().padStart(7, "0")}`;
 }

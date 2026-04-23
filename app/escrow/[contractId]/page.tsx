@@ -1,10 +1,12 @@
 import { Metadata } from "next";
 import EscrowStatus from "@/components/escrow/EscrowStatus";
 import FundingProgress from "@/components/escrow/FundingProgress";
+import MultiSigApproval from "@/components/escrow/MultiSigApproval";
 import RoommateList, { type Roommate } from "@/components/escrow/RoommateList";
-import { ChevronLeft, Info, ExternalLink, ShieldCheck, Activity, Globe } from "lucide-react";
+import { ChevronLeft, ExternalLink, ShieldCheck, Activity, Globe } from "lucide-react";
 import Link from "next/link";
 import { getExplorerLink } from "@/lib/stellar/explorer";
+import { createLandlordMajorityConfig } from "@/lib/stellar/multisig";
 
 /**
  * Metadata generation for dynamic routes.
@@ -54,6 +56,11 @@ export default function EscrowDashboardPage({ params }: { params: { contractId: 
       },
     ] as Roommate[],
   };
+  const multiSigConfig = createLandlordMajorityConfig({
+    escrowAccountId: MOCK_CONTRACT_STATE.id,
+    landlordAddress: MOCK_CONTRACT_STATE.landlord,
+    roommateAddresses: MOCK_CONTRACT_STATE.roommates.map((roommate) => roommate.address),
+  });
 
   return (
     <main className="min-h-screen pt-32 pb-24 relative overflow-hidden bg-[#07070a]">
@@ -162,6 +169,8 @@ export default function EscrowDashboardPage({ params }: { params: { contractId: 
 
            {/* Detailed Roommate Progress */}
            <RoommateList roommates={MOCK_CONTRACT_STATE.roommates} />
+
+           <MultiSigApproval config={multiSigConfig} mockMode />
         </div>
       </div>
       

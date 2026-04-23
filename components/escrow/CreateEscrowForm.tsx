@@ -1,11 +1,14 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { createEscrow } from "@/lib/mock/escrow";
 
 import { getSupportedTokenByIssuer } from "@/lib/stellar/config";
 import { getExplorerLink, type ExplorerProvider } from "@/lib/stellar/explorer";
 import TokenSelect from "@/components/ui/token-select";
 
+import { useFormDraft } from "@/hooks/useFormDraft";
 import RoommateInput from "./RoommateInput";
 import {
   assignSupportedToken,
@@ -116,12 +119,28 @@ export default function CreateEscrowForm({
   contractClient,
   explorer = DEFAULT_EXPLORER,
 }: CreateEscrowFormProps) {
+  const router = useRouter();
   const [step, setStep] = useState(1);
   const [draft, setDraft] = useState<EscrowFormDraft>({
     totalRent: "",
     tokenAddress: "",
     deadlineDate: "",
     roommates: [createRoommate()],
+  const {
+    values: draft,
+    setValues: setDraft,
+    hasDraft,
+    loadDraft,
+    discardDraft,
+    clearDraft,
+  } = useFormDraft<EscrowFormDraft>({
+    key: "escrow_create_draft",
+    initialValues: {
+      totalRent: "",
+      tokenId: "",
+      deadlineDate: "",
+      roommates: [createRoommate()],
+    },
   });
   const [errors, setErrors] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -233,25 +252,48 @@ export default function CreateEscrowForm({
           ...roommateMetadata,
         };
       }
+      // Call the mock service
+      const { contractId } = await createEscrow();
 
-      setSubmission({
-        transactionHash: lastMetadata.transactionHash,
-        contractId: lastMetadata.contractId,
-      });
-      setStep(4);
+      // Clear draft on successful submission
+      clearDraft();
+
+      // Redirect to success page
+      router.push(`/escrow/success?id=${contractId}`);
     } catch (error) {
       setErrors([
         error instanceof Error
           ? error.message
           : "Escrow creation failed. Please try again.",
       ]);
-    } finally {
       setIsSubmitting(false);
     }
   }
 
   return (
     <section className="max-w-3xl mx-auto rounded-3xl glass p-6 sm:p-8">
+      {hasDraft && (
+        <div className="mb-6 flex flex-col sm:flex-row items-center justify-between gap-4 rounded-xl border border-brand-400/40 bg-brand-500/10 p-4 text-sm animate-fade-in">
+          <p className="text-brand-100 font-medium">You have an unsaved draft. Resume?</p>
+          <div className="flex items-center gap-3 w-full sm:w-auto">
+            <button
+              type="button"
+              onClick={discardDraft}
+              className="flex-1 sm:flex-none rounded-lg px-4 py-2 text-dark-300 hover:text-dark-100 hover:bg-white/5 transition-colors"
+            >
+              Discard
+            </button>
+            <button
+              type="button"
+              onClick={loadDraft}
+              className="flex-1 sm:flex-none rounded-lg bg-brand-500 px-4 py-2 text-white font-medium hover:bg-brand-400 transition-colors"
+            >
+              Resume
+            </button>
+          </div>
+        </div>
+      )}
+
       <header className="mb-6 space-y-2">
         <p className="text-xs uppercase tracking-[0.2em] text-brand-300">
           Escrow Setup

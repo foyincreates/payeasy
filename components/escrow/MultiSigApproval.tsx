@@ -1,140 +1,122 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
-  type MultiSigConfig,
+  AlertCircle,
+  Check,
+  KeyRound,
+  Loader2,
+  Send,
+  ShieldCheck,
+  UserCheck,
+  Users,
+} from "lucide-react";
+
+import { useStellar } from "@/context/StellarContext";
+import {
   type ApprovalState,
+  type MultiSigConfig,
   type Signer,
+  type WalletSignTransaction,
   accumulatedWeight,
-  isThresholdMet,
-  pendingSigners,
+  approveRelease,
+  approvedRoommateCount,
+  hasLandlordApproval,
+  isReleaseApproved,
   mockApproval,
+  pendingSigners,
+  requiredRoommateApprovals,
+  mergeApprovalSignatures,
 } from "@/lib/stellar/multisig";
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
+interface SignerRowProps {
+  signer: Signer;
+  approval?: ApprovalState;
+  canApprove: boolean;
+  isCurrentWallet: boolean;
+  loading: boolean;
+  onApprove: (address: string) => void;
+}
 
-function ProgressRing({
-  value,
-  max,
-  size = 72,
-}: {
-  value: number;
-  max: number;
-  size?: number;
-}) {
-  const r = (size - 8) / 2;
-  const circ = 2 * Math.PI * r;
-  const fill = Math.min(value / max, 1);
-  const dash = fill * circ;
-
-  return (
-    <svg width={size} height={size} className="rotate-[-90deg]">
-      <circle
-        cx={size / 2}
-        cy={size / 2}
-        r={r}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={4}
-        className="text-zinc-800"
-      />
-      <circle
-        cx={size / 2}
-        cy={size / 2}
-        r={r}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={4}
-        strokeDasharray={`${dash} ${circ}`}
-        strokeLinecap="round"
-        className={fill >= 1 ? "text-emerald-400" : "text-amber-400"}
-        style={{ transition: "stroke-dasharray 0.5s ease" }}
-      />
-    </svg>
-  );
+function formatAddress(address: string): string {
+  if (address.length <= 16) return address;
+  return `${address.slice(0, 8)}...${address.slice(-6)}`;
 }
 
 function SignerRow({
   signer,
   approval,
-  isConnected,
-  onApprove,
+  canApprove,
+  isCurrentWallet,
   loading,
-}: {
-  signer: Signer;
-  approval?: ApprovalState;
-  isConnected: boolean;
-  onApprove: (address: string) => void;
-  loading: boolean;
-}) {
-  const approved = !!approval;
-  const canApprove = isConnected && !approved;
+  onApprove,
+}: SignerRowProps) {
+  const approved = Boolean(approval);
+  const isLandlord = signer.role === "landlord";
 
   return (
     <div
-      className={`
-        flex items-center justify-between rounded-xl border px-4 py-3
-        transition-all duration-300
-        ${approved
-          ? "border-emerald-500/30 bg-emerald-950/20"
-          : "border-zinc-800 bg-zinc-900/60"
-        }
-      `}
+      className={`rounded-2xl border px-4 py-4 transition-colors ${
+        approved
+          ? "border-accent-400/40 bg-accent-500/10"
+          : isCurrentWallet
+            ? "border-brand-400/40 bg-brand-500/10"
+            : "border-white/10 bg-white/[0.03]"
+      }`}
     >
-      {/* Left: identity */}
-      <div className="flex items-center gap-3 min-w-0">
-        <div
-          className={`
-            h-9 w-9 rounded-full flex items-center justify-center text-xs font-bold shrink-0
-            ${signer.role === "landlord"
-              ? "bg-violet-900/60 text-violet-300"
-              : "bg-sky-900/60 text-sky-300"
-            }
-          `}
-        >
-          {signer.role === "landlord" ? "LL" : "RM"}
-        </div>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-center gap-3">
+          <div
+            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border ${
+              isLandlord
+                ? "border-brand-400/40 bg-brand-500/15 text-brand-200"
+                : "border-accent-400/30 bg-accent-500/10 text-accent-200"
+            }`}
+          >
+            {isLandlord ? (
+              <ShieldCheck className="h-5 w-5" />
+            ) : (
+              <Users className="h-5 w-5" />
+            )}
+          </div>
 
-        <div className="min-w-0">
-          <p className="text-sm font-medium text-zinc-100 capitalize">
-            {signer.role}
-          </p>
-          <p className="text-xs text-zinc-500 font-mono truncate max-w-[160px]">
-            {signer.address.slice(0, 6)}…{signer.address.slice(-6)}
-          </p>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-sm font-bold capitalize text-dark-100">
+                {signer.role}
+              </p>
+              <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-dark-400">
+                Weight {signer.weight}
+              </span>
+            </div>
+            <p className="mt-1 truncate font-mono text-xs text-dark-500">
+              {formatAddress(signer.address)}
+            </p>
+          </div>
         </div>
-      </div>
-
-      {/* Right: weight badge + action */}
-      <div className="flex items-center gap-3 shrink-0">
-        <span className="text-xs text-zinc-400 bg-zinc-800 px-2 py-0.5 rounded-full">
-          w:{signer.weight}
-        </span>
 
         {approved ? (
-          <span className="flex items-center gap-1 text-xs text-emerald-400 font-medium">
-            <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
-              <path
-                fillRule="evenodd"
-                d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                clipRule="evenodd"
-              />
-            </svg>
-            Signed
+          <span className="inline-flex items-center justify-center gap-2 rounded-xl border border-accent-400/30 bg-accent-500/10 px-3 py-2 text-xs font-bold text-accent-200">
+            <Check className="h-4 w-4" />
+            Approved
           </span>
         ) : (
           <button
+            type="button"
             onClick={() => onApprove(signer.address)}
             disabled={!canApprove || loading}
-            className={`
-              rounded-lg px-3 py-1.5 text-xs font-semibold transition-all duration-200
-              ${canApprove
-                ? "bg-amber-500 text-black hover:bg-amber-400 active:scale-95"
-                : "bg-zinc-800 text-zinc-600 cursor-not-allowed"
-              }
-            `}
+            className={`inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs font-bold transition disabled:cursor-not-allowed ${
+              canApprove
+                ? "bg-brand-500 text-white hover:bg-brand-400"
+                : "border border-white/10 bg-white/5 text-dark-600"
+            }`}
           >
-            {loading ? "Signing…" : "Approve"}
+            {loading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <KeyRound className="h-4 w-4" />
+            )}
+            {loading ? "Signing" : isCurrentWallet ? "Approve" : "Switch wallet"}
           </button>
         )}
       </div>
@@ -142,196 +124,297 @@ function SignerRow({
   );
 }
 
-// ─── Main component ───────────────────────────────────────────────────────────
-
 interface MultiSigApprovalProps {
   config: MultiSigConfig;
-  /** Address of the currently connected wallet */
-  connectedAddress?: string;
-  /** Called with final merged XDR when threshold is met */
-  onRelease?: (mergedXdr: string) => void;
-  /** For demo/testing: simulate signing without a real wallet */
+  releaseTransactionXdr?: string;
+  initialApprovals?: ApprovalState[];
+  connectedAddress?: string | null;
+  signTransaction?: WalletSignTransaction;
+  onApprovalChange?: (approvals: ApprovalState[]) => void;
+  onRelease?: (mergedXdr: string, approvals: ApprovalState[]) => void | Promise<void>;
   mockMode?: boolean;
 }
 
 export default function MultiSigApproval({
   config,
+  releaseTransactionXdr,
+  initialApprovals = [],
   connectedAddress,
+  signTransaction,
+  onApprovalChange,
   onRelease,
   mockMode = false,
 }: MultiSigApprovalProps) {
-  const [approvals, setApprovals] = useState<ApprovalState[]>([]);
-  const [loading, setLoading] = useState<string | null>(null); // signer address being processed
+  const { publicKey, isConnected, connect, isConnecting } = useStellar();
+  const [approvals, setApprovals] = useState<ApprovalState[]>(initialApprovals);
+  const [loading, setLoading] = useState<string | null>(null);
   const [released, setReleased] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const weight = accumulatedWeight(approvals, config);
-  const thresholdMet = isThresholdMet(approvals, config);
-  const remaining = pendingSigners(approvals, config);
+  const activeAddress = connectedAddress ?? publicKey;
+  const approvalWeight = accumulatedWeight(approvals, config);
+  const landlordApproved = hasLandlordApproval(approvals, config);
+  const roommateApprovals = approvedRoommateCount(approvals, config);
+  const roommateRequired = requiredRoommateApprovals(config);
+  const releaseReady = isReleaseApproved(approvals, config);
+  const pendingCount = pendingSigners(approvals, config).length;
+  const progressPercent = Math.min((approvalWeight / config.threshold) * 100, 100);
+
+  const signerByAddress = useMemo(() => {
+    return new Map(config.signers.map((signer) => [signer.address, signer]));
+  }, [config.signers]);
+
+  const runWalletSignature = useCallback<WalletSignTransaction>(
+    async (xdr, options) => {
+      if (signTransaction) {
+        return signTransaction(xdr, options);
+      }
+
+      const freighter = await import("@stellar/freighter-api");
+      return freighter.signTransaction(xdr, {
+        networkPassphrase: options.networkPassphrase,
+      });
+    },
+    [signTransaction]
+  );
+
+  const commitApprovals = useCallback(
+    (nextApprovals: ApprovalState[]) => {
+      setApprovals(nextApprovals);
+      onApprovalChange?.(nextApprovals);
+    },
+    [onApprovalChange]
+  );
 
   const handleApprove = useCallback(
     async (signerAddress: string) => {
       setError(null);
-      setLoading(signerAddress);
+
+      const signer = signerByAddress.get(signerAddress);
+      if (!signer) {
+        setError("This wallet is not configured as a release signer.");
+        return;
+      }
+
+      if (approvals.some((approval) => approval.signerAddress === signerAddress)) {
+        return;
+      }
+
+      if (!mockMode && activeAddress !== signerAddress) {
+        setError("Connect the signer wallet before approving this release.");
+        return;
+      }
+
+      if (!mockMode && !releaseTransactionXdr) {
+        setError("Release transaction XDR is required before collecting approvals.");
+        return;
+      }
 
       try {
-        if (mockMode) {
-          // Simulate network latency
-          await new Promise((r) => setTimeout(r, 800));
-          const approval = mockApproval(signerAddress);
-          setApprovals((prev) => [...prev, approval]);
-        } else {
-          // Real Freighter wallet integration point
-          if (!(window as any).freighter) {
-            throw new Error("Freighter wallet not found. Please install it.");
-          }
-          const { signTransaction } = await import("@stellar/freighter-api");
-          // In a real flow: build the tx, get XDR, sign, collect signature
-          throw new Error(
-            "Real signing not yet wired — pass mockMode or implement buildReleaseTransaction flow."
-          );
-        }
-      } catch (err: any) {
-        setError(err.message ?? "Signing failed");
+        setLoading(signerAddress);
+        const approval = mockMode
+          ? mockApproval(signerAddress)
+          : await approveRelease({
+              signerAddress,
+              transactionXdr: releaseTransactionXdr as string,
+              config,
+              signTransaction: runWalletSignature,
+              network: config.networkPassphrase.includes("Test") ? "TESTNET" : "PUBLIC",
+            });
+
+        commitApprovals([
+          ...approvals.filter((item) => item.signerAddress !== signerAddress),
+          approval,
+        ]);
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : "Approval signing failed.");
       } finally {
         setLoading(null);
       }
     },
-    [mockMode]
+    [
+      activeAddress,
+      approvals,
+      commitApprovals,
+      config,
+      mockMode,
+      releaseTransactionXdr,
+      runWalletSignature,
+      signerByAddress,
+    ]
   );
 
   const handleRelease = useCallback(async () => {
-    setLoading("release");
+    if (!releaseReady) {
+      setError("Landlord approval, roommate majority, and threshold are required.");
+      return;
+    }
+
     try {
-      await new Promise((r) => setTimeout(r, 600));
-      const fakeXdr = btoa(JSON.stringify({ approvals, config }));
+      setLoading("release");
+      setError(null);
+      const mergedXdr =
+        mockMode && !releaseTransactionXdr
+          ? JSON.stringify({ approvals, escrowAccountId: config.escrowAccountId })
+          : mergeApprovalSignatures(approvals, config);
+
+      await onRelease?.(mergedXdr, approvals);
       setReleased(true);
-      onRelease?.(fakeXdr);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Release submission failed.");
     } finally {
       setLoading(null);
     }
-  }, [approvals, config, onRelease]);
-
-  // ── Render ────────────────────────────────────────────────────────────────
+  }, [approvals, config, mockMode, onRelease, releaseReady, releaseTransactionXdr]);
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 flex items-center justify-center p-4 font-sans">
-      <div className="w-full max-w-md space-y-4">
-
-        {/* Header card */}
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
-          <div className="flex items-start justify-between mb-5">
-            <div>
-              <p className="text-xs text-zinc-500 uppercase tracking-widest mb-1">
-                Escrow Release
-              </p>
-              <h1 className="text-xl font-bold text-white">Multi-Sig Approval</h1>
-              <p className="text-xs text-zinc-500 font-mono mt-1">
-                {config.escrowAccountId.slice(0, 8)}…
-                {config.escrowAccountId.slice(-6)}
-              </p>
-            </div>
-
-            {/* Progress ring */}
-            <div className="relative flex items-center justify-center">
-              <ProgressRing value={weight} max={config.threshold} />
-              <span className="absolute text-[11px] font-bold text-zinc-200 rotate-[90deg]">
-                {weight}/{config.threshold}
-              </span>
-            </div>
+    <section className="glass-card p-6 sm:p-8">
+      <header className="mb-6 flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-3">
+          <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-brand-200">
+            <ShieldCheck className="h-3.5 w-3.5" />
+            Multi-Sig Release
           </div>
-
-          {/* Threshold bar */}
-          <div className="space-y-1.5">
-            <div className="flex justify-between text-xs text-zinc-500">
-              <span>Weight accumulated</span>
-              <span>
-                {weight} / {config.threshold} required
-              </span>
-            </div>
-            <div className="h-1.5 rounded-full bg-zinc-800 overflow-hidden">
-              <div
-                className={`h-full rounded-full transition-all duration-500 ${
-                  thresholdMet ? "bg-emerald-400" : "bg-amber-400"
-                }`}
-                style={{
-                  width: `${Math.min((weight / config.threshold) * 100, 100)}%`,
-                }}
-              />
-            </div>
+          <div>
+            <h2 className="text-2xl font-black text-white">Release Approvals</h2>
+            <p className="mt-2 max-w-2xl text-sm font-medium leading-relaxed text-dark-400">
+              Landlord signature plus {roommateRequired} roommate
+              {roommateRequired === 1 ? "" : "s"} required before the release
+              transaction can be submitted.
+            </p>
           </div>
         </div>
 
-        {/* Success state */}
-        {released ? (
-          <div className="rounded-2xl border border-emerald-500/30 bg-emerald-950/30 p-6 text-center space-y-2">
-            <div className="mx-auto w-12 h-12 rounded-full bg-emerald-500/20 flex items-center justify-center">
-              <svg className="h-6 w-6 text-emerald-400" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-              </svg>
-            </div>
-            <p className="font-semibold text-emerald-300">Funds Released</p>
-            <p className="text-xs text-zinc-400">Transaction submitted to Stellar network</p>
+        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+          <p className="text-[10px] font-black uppercase tracking-widest text-dark-500">
+            Approval Weight
+          </p>
+          <p className="mt-1 text-2xl font-black text-white">
+            {approvalWeight}
+            <span className="text-sm text-dark-500"> / {config.threshold}</span>
+          </p>
+          <div className="mt-3 h-2 w-48 max-w-full overflow-hidden rounded-full bg-white/10">
+            <div
+              className={`h-full rounded-full transition-all ${
+                releaseReady ? "bg-accent-400" : "bg-brand-400"
+              }`}
+              style={{ width: `${progressPercent}%` }}
+            />
           </div>
-        ) : (
-          <>
-            {/* Signers list */}
-            <div className="space-y-2">
-              {config.signers.map((signer) => {
-                const approval = approvals.find(
-                  (a) => a.signerAddress === signer.address
-                );
-                const isConnected =
-                  mockMode || connectedAddress === signer.address;
+        </div>
+      </header>
 
-                return (
-                  <SignerRow
-                    key={signer.address}
-                    signer={signer}
-                    approval={approval}
-                    isConnected={isConnected}
-                    onApprove={handleApprove}
-                    loading={loading === signer.address}
-                  />
-                );
-              })}
-            </div>
-
-            {/* Error */}
-            {error && (
-              <div className="rounded-xl border border-red-500/30 bg-red-950/20 px-4 py-3 text-sm text-red-400">
-                {error}
-              </div>
+      <div className="mb-6 grid gap-3 sm:grid-cols-3">
+        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+          <p className="text-[10px] font-black uppercase tracking-widest text-dark-500">
+            Landlord
+          </p>
+          <p className="mt-2 flex items-center gap-2 text-sm font-bold text-dark-100">
+            {landlordApproved ? (
+              <Check className="h-4 w-4 text-accent-300" />
+            ) : (
+              <UserCheck className="h-4 w-4 text-dark-500" />
             )}
+            {landlordApproved ? "Approved" : "Pending"}
+          </p>
+        </div>
 
-            {/* Release button */}
+        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+          <p className="text-[10px] font-black uppercase tracking-widest text-dark-500">
+            Roommates
+          </p>
+          <p className="mt-2 flex items-center gap-2 text-sm font-bold text-dark-100">
+            <Users className="h-4 w-4 text-brand-300" />
+            {roommateApprovals} / {roommateRequired}
+          </p>
+        </div>
+
+        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+          <p className="text-[10px] font-black uppercase tracking-widest text-dark-500">
+            Wallet
+          </p>
+          {isConnected || activeAddress ? (
+            <p className="mt-2 truncate font-mono text-xs font-bold text-dark-200">
+              {formatAddress(activeAddress ?? "")}
+            </p>
+          ) : (
             <button
-              onClick={handleRelease}
-              disabled={!thresholdMet || loading === "release"}
-              className={`
-                w-full rounded-xl py-3.5 text-sm font-bold tracking-wide transition-all duration-300
-                ${thresholdMet
-                  ? "bg-emerald-500 text-black hover:bg-emerald-400 active:scale-[0.98] shadow-lg shadow-emerald-500/20"
-                  : "bg-zinc-800 text-zinc-600 cursor-not-allowed"
-                }
-              `}
+              type="button"
+              onClick={() => {
+                void connect();
+              }}
+              disabled={isConnecting}
+              className="mt-2 inline-flex items-center gap-2 rounded-xl bg-brand-500 px-3 py-2 text-xs font-bold text-white disabled:opacity-60"
             >
-              {loading === "release"
-                ? "Submitting…"
-                : thresholdMet
-                ? "Release Funds"
-                : `${remaining.length} approval${remaining.length !== 1 ? "s" : ""} remaining`}
+              {isConnecting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Connect
             </button>
-
-            {/* Mock mode label */}
-            {mockMode && (
-              <p className="text-center text-xs text-zinc-600">
-                Mock mode — no real transactions
-              </p>
-            )}
-          </>
-        )}
+          )}
+        </div>
       </div>
-    </div>
+
+      <div className="space-y-3">
+        {config.signers.map((signer) => {
+          const approval = approvals.find(
+            (item) => item.signerAddress === signer.address
+          );
+          const isCurrentWallet = mockMode || activeAddress === signer.address;
+          const canApprove =
+            !approval &&
+            (mockMode || Boolean(releaseTransactionXdr)) &&
+            isCurrentWallet &&
+            loading === null;
+
+          return (
+            <SignerRow
+              key={signer.address}
+              signer={signer}
+              approval={approval}
+              canApprove={canApprove}
+              isCurrentWallet={isCurrentWallet}
+              loading={loading === signer.address}
+              onApprove={handleApprove}
+            />
+          );
+        })}
+      </div>
+
+      {error ? (
+        <div className="mt-5 flex items-start gap-3 rounded-2xl border border-red-400/30 bg-red-500/10 p-4 text-sm font-medium text-red-200">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          <p>{error}</p>
+        </div>
+      ) : null}
+
+      {released ? (
+        <div className="mt-5 rounded-2xl border border-accent-400/40 bg-accent-500/10 p-4 text-sm font-bold text-accent-100">
+          Release transaction is approved and ready for network submission.
+        </div>
+      ) : (
+        <footer className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-xs font-medium text-dark-500">
+            {releaseReady
+              ? "Threshold satisfied."
+              : `${pendingCount} signer${pendingCount === 1 ? "" : "s"} pending.`}
+            {mockMode ? " Mock mode is active." : ""}
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              void handleRelease();
+            }}
+            disabled={!releaseReady || loading === "release"}
+            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-accent-500 px-5 py-3 text-sm font-black text-dark-950 transition hover:bg-accent-400 disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-dark-600"
+          >
+            {loading === "release" ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Send className="h-4 w-4" />
+            )}
+            {loading === "release" ? "Preparing" : "Release Funds"}
+          </button>
+        </footer>
+      )}
+    </section>
   );
 }
