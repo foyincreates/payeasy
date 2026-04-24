@@ -1,5 +1,7 @@
 import { Metadata } from "next";
+import { Suspense } from "react";
 import TransactionList from "@/components/history/TransactionList";
+import TransactionListSkeleton from "@/components/history/TransactionListSkeleton";
 import { History, LayoutDashboard, Database } from "lucide-react";
 import Link from "next/link";
 import { type Transaction } from "@/components/history/TransactionCard";
@@ -76,10 +78,12 @@ const MOCK_TRANSACTIONS: Transaction[] = [
   },
 ];
 
-/**
- * Transaction History Page.
- * Displays a chronological list of escrow interactions for the current user.
- */
+async function TransactionData() {
+  // Simulates Horizon API latency — skeleton renders immediately while this resolves
+  await new Promise((resolve) => setTimeout(resolve, 2000));
+  return <TransactionList initialTransactions={MOCK_TRANSACTIONS} />;
+}
+
 export default function HistoryPage() {
   return (
     <main className="min-h-screen pt-28 pb-20 relative overflow-hidden bg-[#0a0a0f]">
@@ -125,7 +129,9 @@ export default function HistoryPage() {
 
         <div className="relative animate-in fade-in slide-in-from-bottom-12 duration-1000 ease-in-out fill-mode-backwards delay-300">
           <div className="absolute inset-x-0 -top-px h-px bg-gradient-to-r from-transparent via-brand-500/30 to-transparent" />
-          <TransactionList initialTransactions={MOCK_TRANSACTIONS} />
+          <Suspense fallback={<TransactionListSkeleton />}>
+            <TransactionData />
+          </Suspense>
           <div className="absolute inset-x-0 -bottom-px h-px bg-gradient-to-r from-transparent via-accent-500/20 to-transparent" />
         </div>
       </div>
