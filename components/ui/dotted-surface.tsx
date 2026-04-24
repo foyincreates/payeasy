@@ -3,7 +3,6 @@
 import { cn } from "@/lib/utils";
 import { useTheme } from "next-themes";
 import React, { useEffect, useRef } from "react";
-import * as THREE from "three";
 
 type DottedSurfaceProps = Omit<React.ComponentProps<"div">, "ref">;
 
@@ -11,174 +10,160 @@ export function DottedSurface({ className, ...props }: DottedSurfaceProps) {
   const { theme } = useTheme();
 
   const containerRef = useRef<HTMLDivElement>(null);
-  const sceneRef = useRef<{
-    scene: THREE.Scene;
-    camera: THREE.PerspectiveCamera;
-    renderer: THREE.WebGLRenderer;
-    particles: THREE.Points[];
-    animationId: number;
-    count: number;
-  } | null>(null);
 
   useEffect(() => {
-    if (!containerRef.current) return;
     const container = containerRef.current;
 
-    const SEPARATION = 150;
-    const AMOUNTX = 40;
-    const AMOUNTY = 60;
-
-    // Scene setup
-    const scene = new THREE.Scene();
-    scene.fog = new THREE.Fog(0x0a0a0f, 2000, 10000);
-
-    const camera = new THREE.PerspectiveCamera(
-      60,
-      window.innerWidth / window.innerHeight,
-      1,
-      10000
-    );
-    camera.position.set(0, 355, 1220);
-
-    const renderer = new THREE.WebGLRenderer({
-      alpha: true,
-      antialias: true,
-    });
-    renderer.setPixelRatio(window.devicePixelRatio);
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setClearColor(scene.fog.color, 0);
-
-    container.appendChild(renderer.domElement);
-
-    // Create particles
-    const particles: THREE.Points[] = [];
-    const positions: number[] = [];
-    const colors: number[] = [];
-
-    // Create geometry for all particles
-    const geometry = new THREE.BufferGeometry();
-
-    for (let ix = 0; ix < AMOUNTX; ix++) {
-      for (let iy = 0; iy < AMOUNTY; iy++) {
-        const x = ix * SEPARATION - (AMOUNTX * SEPARATION) / 2;
-        const y = 0;
-        const z = iy * SEPARATION - (AMOUNTY * SEPARATION) / 2;
-
-        positions.push(x, y, z);
-
-        // Use PayEasy brand colors - mix of blue and teal tones
-        if (theme === "dark" || !theme) {
-          // Subtle brand-tinted dots for dark theme
-          const blueInfluence = Math.random();
-          if (blueInfluence > 0.5) {
-            // Brand blue tint: rgb(92, 124, 250) normalized
-            colors.push(0.36, 0.49, 0.98);
-          } else {
-            // Accent teal tint: rgb(32, 201, 151) normalized
-            colors.push(0.13, 0.79, 0.59);
-          }
-        } else {
-          colors.push(0, 0, 0);
-        }
-      }
+    if (!container) {
+      return;
     }
 
-    geometry.setAttribute(
-      "position",
-      new THREE.Float32BufferAttribute(positions, 3)
-    );
-    geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+    let isDisposed = false;
+    let cleanupScene = () => {};
 
-    // Create material
-    const material = new THREE.PointsMaterial({
-      size: 6,
-      vertexColors: true,
-      transparent: true,
-      opacity: 0.35,
-      sizeAttenuation: true,
-    });
+    const loadScene = async () => {
+      const THREE = await import("three");
 
-    // Create points object
-    const points = new THREE.Points(geometry, material);
-    scene.add(points);
+      if (isDisposed || !container.isConnected) {
+        return;
+      }
 
-    let count = 0;
-    let animationId = 0;
+      const SEPARATION = 150;
+      const AMOUNTX = 40;
+      const AMOUNTY = 60;
 
-    // Animation function
-    const animate = () => {
-      animationId = requestAnimationFrame(animate);
+      const scene = new THREE.Scene();
+      scene.fog = new THREE.Fog(0x0a0a0f, 2000, 10000);
 
-      const positionAttribute = geometry.attributes.position;
-      const posArray = positionAttribute.array as Float32Array;
+      const camera = new THREE.PerspectiveCamera(
+        60,
+        window.innerWidth / window.innerHeight,
+        1,
+        10000
+      );
+      camera.position.set(0, 355, 1220);
 
-      let i = 0;
+      const renderer = new THREE.WebGLRenderer({
+        alpha: true,
+        antialias: true,
+      });
+      renderer.setPixelRatio(window.devicePixelRatio);
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setClearColor(scene.fog.color, 0);
+
+      container.appendChild(renderer.domElement);
+
+      const positions: number[] = [];
+      const colors: number[] = [];
+      const geometry = new THREE.BufferGeometry();
+
       for (let ix = 0; ix < AMOUNTX; ix++) {
         for (let iy = 0; iy < AMOUNTY; iy++) {
-          const index = i * 3;
+          const x = ix * SEPARATION - (AMOUNTX * SEPARATION) / 2;
+          const y = 0;
+          const z = iy * SEPARATION - (AMOUNTY * SEPARATION) / 2;
 
-          // Animate Y position with sine waves
-          posArray[index + 1] =
-            Math.sin((ix + count) * 0.3) * 50 +
-            Math.sin((iy + count) * 0.5) * 50;
+          positions.push(x, y, z);
 
-          i++;
+          if (theme === "dark" || !theme) {
+            const blueInfluence = Math.random();
+            if (blueInfluence > 0.5) {
+              colors.push(0.36, 0.49, 0.98);
+            } else {
+              colors.push(0.13, 0.79, 0.59);
+            }
+          } else {
+            colors.push(0, 0, 0);
+          }
         }
       }
 
-      positionAttribute.needsUpdate = true;
-      renderer.render(scene, camera);
-      count += 0.1;
-    };
+      geometry.setAttribute(
+        "position",
+        new THREE.Float32BufferAttribute(positions, 3)
+      );
+      geometry.setAttribute(
+        "color",
+        new THREE.Float32BufferAttribute(colors, 3)
+      );
 
-    // Handle window resize
-    const handleResize = () => {
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
-    };
+      const material = new THREE.PointsMaterial({
+        size: 6,
+        vertexColors: true,
+        transparent: true,
+        opacity: 0.35,
+        sizeAttenuation: true,
+      });
 
-    window.addEventListener("resize", handleResize);
+      const points = new THREE.Points(geometry, material);
+      scene.add(points);
 
-    // Start animation
-    animate();
+      let count = 0;
+      let animationId = 0;
 
-    // Store references
-    sceneRef.current = {
-      scene,
-      camera,
-      renderer,
-      particles: [points],
-      animationId,
-      count,
-    };
+      const animate = () => {
+        animationId = window.requestAnimationFrame(animate);
 
-    // Cleanup function
-    return () => {
-      window.removeEventListener("resize", handleResize);
+        const positionAttribute = geometry.attributes.position;
+        const posArray = positionAttribute.array as Float32Array;
 
-      if (sceneRef.current) {
-        cancelAnimationFrame(sceneRef.current.animationId);
+        let i = 0;
+        for (let ix = 0; ix < AMOUNTX; ix++) {
+          for (let iy = 0; iy < AMOUNTY; iy++) {
+            const index = i * 3;
 
-        sceneRef.current.scene.traverse((object) => {
+            posArray[index + 1] =
+              Math.sin((ix + count) * 0.3) * 50 +
+              Math.sin((iy + count) * 0.5) * 50;
+
+            i++;
+          }
+        }
+
+        positionAttribute.needsUpdate = true;
+        renderer.render(scene, camera);
+        count += 0.1;
+      };
+
+      const handleResize = () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      };
+
+      window.addEventListener("resize", handleResize);
+      animate();
+
+      cleanupScene = () => {
+        window.removeEventListener("resize", handleResize);
+        window.cancelAnimationFrame(animationId);
+
+        scene.traverse((object) => {
           if (object instanceof THREE.Points) {
             object.geometry.dispose();
             if (Array.isArray(object.material)) {
-              object.material.forEach((mat) => mat.dispose());
+              object.material.forEach((currentMaterial) =>
+                currentMaterial.dispose()
+              );
             } else {
               object.material.dispose();
             }
           }
         });
 
-        sceneRef.current.renderer.dispose();
+        renderer.dispose();
 
-        if (container && sceneRef.current.renderer.domElement) {
-          container.removeChild(
-            sceneRef.current.renderer.domElement
-          );
+        if (container.contains(renderer.domElement)) {
+          container.removeChild(renderer.domElement);
         }
-      }
+      };
+    };
+
+    void loadScene();
+
+    return () => {
+      isDisposed = true;
+      cleanupScene();
     };
   }, [theme]);
 

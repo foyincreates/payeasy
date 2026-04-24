@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "analyze": "ANALYZE=true next build",
     "start": "next start",
     "lint": "next lint",
     "test": "node --test --experimental-strip-types --experimental-test-module-mocks",
@@ -25,6 +26,7 @@
     "three": "^0.183.2"
   },
   "devDependencies": {
+    "@next/bundle-analyzer": "^14.2.0",
     "@types/canvas-confetti": "^1.9.0",
     "@types/node": "^20.0.0",
     "@types/react": "^18.2.0",

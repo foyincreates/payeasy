@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import "@/lib/env";
 import { AppShell } from "@/components/ui/app-shell";
 import { StellarAuthProvider } from "@/contexts/StellarAuthContext";
 import "./globals.css";
