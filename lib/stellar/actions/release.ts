@@ -90,44 +90,25 @@ export async function assertFullyFunded(
   }
 }
 
-// ─── Core action ─────────────────────────────────────────────────────────────
+// ─── Phase 1: build + simulate ────────────────────────────────────────────────
 
 /**
- * Full release flow:
- *  1. Assert escrow is fully funded
- *  2. Resolve Freighter public key
- *  3. Build Soroban invoke transaction (calling `release`)
- *  4. Simulate to get resource estimates and footprint
- *  5. Sign via Freighter
- *  6. Submit and await confirmation
- *  7. Return parsed result
+ * Validates funding status, builds the release transaction, runs a simulation
+ * to obtain resource estimates, and returns the prepared transaction XDR.
+ * Call this before showing the TransactionReview modal.
  */
-export async function releaseEscrow(
-  params: ReleaseParams
-): Promise<ReleaseResult> {
+export async function buildReleaseXdr(params: ReleaseParams): Promise<string> {
   const { contractId, landlordAddress } = params;
 
-  // ── 1. Funding check ─────────────────────────────────────────────────────
   await assertFullyFunded(contractId, landlordAddress);
 
-  // ── 2. Freighter guard ───────────────────────────────────────────────────
-  if (typeof window === "undefined" || !(window as any).freighter) {
+  const { isConnected } = await freighterApi.isConnected();
+  if (!isConnected) {
     throw new FreighterNotAvailableError();
   }
 
-  const { address: connectedKey } = await getAddress();
-  if (connectedKey !== landlordAddress) {
-    throw new Error(
-      `Connected wallet (${connectedKey.slice(0, 6)}…) does not match ` +
-        `expected landlord (${landlordAddress.slice(0, 6)}…). ` +
-        `Switch accounts in Freighter.`
-    );
-  }
-
-  // ── 3. Build transaction ─────────────────────────────────────────────────
   const server = new rpc.Server(RPC_URL);
   const account = await server.getAccount(landlordAddress);
-
   const contract = new Contract(contractId);
 
   const tx = new TransactionBuilder(account, {
@@ -138,35 +119,58 @@ export async function releaseEscrow(
     .setTimeout(300)
     .build();
 
-  // ── 4. Simulate (get resource fees + footprint) ──────────────────────────
   let simResult;
   try {
     simResult = await server.simulateTransaction(tx);
-  } catch (error: any) {
-    throw new Error(`Simulation request failed: ${error.message}`);
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : String(error);
+    throw new Error(`Simulation request failed: ${msg}`);
   }
 
   if (rpc.Api.isSimulationError(simResult)) {
     throw new Error(`Simulation failed: ${simResult.error}`);
   }
 
-  const preparedTx = rpc.assembleTransaction(tx, simResult).build();
+  return rpc.assembleTransaction(tx, simResult).build().toXDR();
+}
 
-  // ── 5. Sign via Freighter ────────────────────────────────────────────────
+// ─── Phase 2: sign + submit ───────────────────────────────────────────────────
+
+/**
+ * Signs the prepared XDR via Freighter, submits it to Horizon, and polls
+ * for on-chain confirmation. Call this after the user approves in the
+ * TransactionReview modal.
+ */
+export async function signAndSubmitRelease(
+  preparedXdr: string,
+  landlordAddress: string
+): Promise<ReleaseResult> {
+  const { address: connectedKey } = await getAddress();
+  if (connectedKey !== landlordAddress) {
+    throw new Error(
+      `Connected wallet (${connectedKey.slice(0, 6)}…) does not match ` +
+        `expected landlord (${landlordAddress.slice(0, 6)}…). ` +
+        `Switch accounts in Freighter.`
+    );
+  }
+
   let signedTxXdr: string;
   try {
-    const signResponse = await signTransaction(preparedTx.toXDR(), {
+    const signResponse = await signTransaction(preparedXdr, {
       networkPassphrase: NETWORK_PASSPHRASE,
     });
-    signedTxXdr = (signResponse as any).signedTxXdr || (signResponse as any).txXdr || signResponse;
+    signedTxXdr = (signResponse as { signedTxXdr?: string; txXdr?: string } & string).signedTxXdr
+      ?? (signResponse as { signedTxXdr?: string; txXdr?: string } & string).txXdr
+      ?? (signResponse as unknown as string);
     if (typeof signedTxXdr !== "string") {
       throw new Error(`Unexpected Freighter response type: ${typeof signedTxXdr}`);
     }
-  } catch (error: any) {
-    throw new Error(`Failed to sign transaction with Freighter: ${error.message || error}`);
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to sign transaction with Freighter: ${msg}`);
   }
 
-  // ── 6. Submit ────────────────────────────────────────────────────────────
+  const server = new rpc.Server(RPC_URL);
   const sendResult = await server.sendTransaction(
     TransactionBuilder.fromXDR(signedTxXdr, NETWORK_PASSPHRASE)
   );
@@ -177,7 +181,6 @@ export async function releaseEscrow(
     );
   }
 
-  // Poll for confirmation
   const txHash = sendResult.hash;
   let getResult = await server.getTransaction(txHash);
 
@@ -199,9 +202,22 @@ export async function releaseEscrow(
     );
   }
 
-  // ── 7. Parse return value ────────────────────────────────────────────────
   return {
     txHash,
     confirmedAt: new Date(),
   };
+}
+
+// ─── Convenience wrapper ──────────────────────────────────────────────────────
+
+/**
+ * Full release flow: build XDR, sign via Freighter, submit and confirm.
+ * Use buildReleaseXdr + signAndSubmitRelease directly when you need to
+ * show a TransactionReview modal between the two phases.
+ */
+export async function releaseEscrow(
+  params: ReleaseParams
+): Promise<ReleaseResult> {
+  const xdr = await buildReleaseXdr(params);
+  return signAndSubmitRelease(xdr, params.landlordAddress);
 }
