@@ -157,9 +157,8 @@ export async function getFreighterNetwork(): Promise<"TESTNET" | "MAINNET" | nul
     // Try to get the network from the Freighter API
     const freighterModule = await import("@stellar/freighter-api");
     if (typeof freighterModule.getNetwork === "function") {
-      const network = await freighterModule.getNetwork();
-      // Normalize to uppercase
-      return network.toUpperCase() as "TESTNET" | "MAINNET";
+      const networkResult = await freighterModule.getNetwork();
+      return networkResult.network.toUpperCase() as "TESTNET" | "MAINNET";
     } else {
       // Fallback: if getNetwork is not available, we cannot determine the network
       return null;

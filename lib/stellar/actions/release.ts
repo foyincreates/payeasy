@@ -159,9 +159,8 @@ export async function signAndSubmitRelease(
     const signResponse = await signTransaction(preparedXdr, {
       networkPassphrase: NETWORK_PASSPHRASE,
     });
-    signedTxXdr = (signResponse as { signedTxXdr?: string; txXdr?: string } & string).signedTxXdr
-      ?? (signResponse as { signedTxXdr?: string; txXdr?: string } & string).txXdr
-      ?? (signResponse as unknown as string);
+    const resp = signResponse as unknown as { signedTxXdr?: string; txXdr?: string };
+    signedTxXdr = resp.signedTxXdr ?? resp.txXdr ?? (signResponse as unknown as string);
     if (typeof signedTxXdr !== "string") {
       throw new Error(`Unexpected Freighter response type: ${typeof signedTxXdr}`);
     }

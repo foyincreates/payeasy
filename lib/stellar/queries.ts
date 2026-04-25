@@ -279,17 +279,17 @@ export interface ContractState {
 
 export async function getContractState(contractId: string): Promise<ContractState> {
   const { rpcServer, networkPassphrase } = await import("./config.ts");
-  const { TransactionBuilder, Address, Contract, scValToNative } = await import("@stellar/stellar-sdk");
+  const { TransactionBuilder, Account, Contract, scValToNative, rpc: rpcHelpers } = await import("@stellar/stellar-sdk");
 
   const buildInvocationXdr = ({ contractId, method, args = [] }: BuildInvocationParams): string => {
     const contract = new Contract(contractId);
-    const source = new Address(contractId).toScAddress();
+    const source = new Account(contractId, "0");
 
     const tx = new TransactionBuilder(source, {
       fee: "100",
       networkPassphrase,
     })
-      .addOperation(contract.callFunction(method, ...args))
+      .addOperation(contract.call(method, ...(args as import("@stellar/stellar-sdk").xdr.ScVal[])))
       .setTimeout(60)
       .build();
 
@@ -298,16 +298,17 @@ export async function getContractState(contractId: string): Promise<ContractStat
 
   const ctx: QueryContext = {
     client: {
-      async simulateTransaction(xdr: string): Promise<SimulateTransactionResponse> {
+      async simulateTransaction(xdrStr: string): Promise<SimulateTransactionResponse> {
         try {
-          const result = await rpcServer.simulateTransaction(xdr);
+          const tx = TransactionBuilder.fromXDR(xdrStr, networkPassphrase);
+          const result = await rpcServer.simulateTransaction(tx);
 
-          if (result.errorResult && result.errorResult.length > 0) {
-            return { error: result.errorResult };
+          if (rpcHelpers.Api.isSimulationError(result)) {
+            return { error: result.error };
           }
 
           let retval: unknown = undefined;
-          if (result.result && result.result.retval) {
+          if (rpcHelpers.Api.isSimulationSuccess(result) && result.result?.retval) {
             try {
               retval = scValToNative(result.result.retval);
             } catch {

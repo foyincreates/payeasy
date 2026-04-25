@@ -33,12 +33,8 @@ export default function FundTestnetButton({
   const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const isTestnet = getCurrentNetwork() === "testnet";
-  
-  if (!isTestnet) {
-    return null;
-  }
 
-  // Cleanup timer on unmount
+  // Cleanup timer on unmount — must be before any conditional return
   useEffect(() => {
     return () => {
       if (pollTimerRef.current) {
@@ -46,6 +42,10 @@ export default function FundTestnetButton({
       }
     };
   }, []);
+
+  if (!isTestnet) {
+    return null;
+  }
 
   async function handleFund() {
     if (fundingStatus === "loading" || fundingStatus === "confirming" || !publicKey) return;

@@ -5,6 +5,7 @@ import { DottedSurface } from "@/components/ui/dotted-surface";
 import { StellarProvider } from "@/context/StellarContext";
 import { ToastProvider } from "@/components/ui/toast-provider";
 import { SkipLink } from "@/components/ui/skip-link";
+import { ErrorBoundary } from "@/components/ui/error-boundary";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   return (
@@ -19,7 +20,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <SkipLink />
       <StellarProvider>
         <ToastProvider>
-          <div className="relative z-10">{children}</div>
+          <ErrorBoundary>
+            <div className="relative z-10">{children}</div>
+          </ErrorBoundary>
         </ToastProvider>
       </StellarProvider>
     </ThemeProvider>
