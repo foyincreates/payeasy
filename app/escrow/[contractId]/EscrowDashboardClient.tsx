@@ -1,16 +1,19 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import EscrowStatus from "@/components/escrow/EscrowStatus";
 import FundingProgress from "@/components/escrow/FundingProgress";
 import MultiSigApproval from "@/components/escrow/MultiSigApproval";
 import RoommateList, { type Roommate } from "@/components/escrow/RoommateList";
 import EscrowDashboardSkeleton from "@/components/escrow/EscrowDashboardSkeleton";
-import { ChevronLeft, ExternalLink, ShieldCheck, Activity, Globe } from "lucide-react";
+import { ChevronLeft, ExternalLink, ShieldCheck, Activity, Globe, RotateCcw, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { getExplorerLink } from "@/lib/stellar/explorer";
 import { createLandlordMajorityConfig } from "@/lib/stellar/multisig";
 import RefreshIndicator from "@/components/escrow/RefreshIndicator";
+import { useStellarAuth } from "@/context/StellarContext";
+import { useToastContext } from "@/components/ui/toast-provider";
+import { claimRefund, stroopsToXlm } from "@/lib/stellar/actions/claimRefund";
 
 interface Props {
   contractId: string;
@@ -21,6 +24,8 @@ interface ContractState {
   landlord: string;
   totalRent: string;
   deadline: string;
+  /** Unix timestamp (seconds) for deadline comparisons. */
+  deadlineEpoch: number;
   status: "active" | "funded" | "released" | "expired";
   totalFunded: number;
   lastUpdate: string;
@@ -28,22 +33,25 @@ interface ContractState {
 }
 
 export default function EscrowDashboardClient({ contractId }: Props) {
+  const { publicKey } = useStellarAuth();
+  const toast = useToastContext();
+
   const [contractState, setContractState] = useState<ContractState | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isClaimingRefund, setIsClaimingRefund] = useState(false);
 
-  useEffect(() => {
-    // Artificial 3s delay to verify skeleton renders before content
-    fetchData();
-  }, [contractId]);
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
+    setIsLoading(true);
     return new Promise<void>((resolve) => {
       setTimeout(() => {
+        // April 05, 2026 => epoch 1743811200 (past as of current date)
+        const deadlineEpoch = 1743811200;
         setContractState({
           id: contractId,
           landlord: "GD7K4X5L7P2Q9F6N1M3R8S4T0U1V2W3X4Y5Z6A7B8C9D0E1F2G",
           totalRent: "1250",
           deadline: "April 05, 2026",
+          deadlineEpoch,
           status: "active",
           totalFunded: 775,
           lastUpdate: new Date().toISOString(),
@@ -72,6 +80,45 @@ export default function EscrowDashboardClient({ contractId }: Props) {
         resolve();
       }, 1000);
     });
+  }, [contractId]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  const currentRoommate = contractState?.roommates.find(
+    (r) => r.address === publicKey
+  );
+
+  const nowEpoch = Math.floor(Date.now() / 1000);
+  const isDeadlinePassed =
+    contractState != null && nowEpoch > contractState.deadlineEpoch;
+  const isNotFullyFunded = contractState?.status !== "funded";
+  const hasNonZeroPaid =
+    currentRoommate != null && BigInt(currentRoommate.paidAmount) > BigInt(0);
+
+  const showClaimRefundButton =
+    isDeadlinePassed && isNotFullyFunded && hasNonZeroPaid;
+
+  const handleClaimRefund = async () => {
+    if (!publicKey || !contractState) return;
+    setIsClaimingRefund(true);
+    try {
+      const result = await claimRefund({
+        contractId,
+        roommateAddress: publicKey,
+        deadlineTimestamp: contractState.deadlineEpoch,
+        refundableAmount: currentRoommate?.paidAmount,
+      });
+      const xlmAmount = stroopsToXlm(result.refundedAmount);
+      toast.show(`Refund of ${xlmAmount} XLM sent.`, "success");
+      fetchData();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Refund failed.";
+      toast.show(message, "error");
+    } finally {
+      setIsClaimingRefund(false);
+    }
   };
 
   const multiSigConfig = contractState
@@ -188,6 +235,37 @@ export default function EscrowDashboardClient({ contractId }: Props) {
               </div>
 
               <RoommateList roommates={contractState!.roommates} />
+
+              {/* Claim Refund — visible only when eligible */}
+              {showClaimRefundButton && (
+                <div className="glass-card p-8 flex flex-col sm:flex-row items-center justify-between gap-6 border border-amber-500/20 bg-amber-500/5">
+                  <div className="space-y-1 text-center sm:text-left">
+                    <h3 className="text-white font-black text-lg uppercase tracking-widest">
+                      Refund Available
+                    </h3>
+                    <p className="text-dark-400 text-sm">
+                      The funding deadline has passed and the escrow was not fully funded. You can reclaim your deposit.
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleClaimRefund}
+                    disabled={isClaimingRefund}
+                    className="btn-primary !py-3 !px-8 !rounded-xl font-black uppercase tracking-widest flex items-center gap-2 shrink-0 disabled:opacity-50"
+                  >
+                    {isClaimingRefund ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Claiming...
+                      </>
+                    ) : (
+                      <>
+                        <RotateCcw className="h-4 w-4" />
+                        Claim Refund
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
 
               <MultiSigApproval config={multiSigConfig!} mockMode />
             </div>
