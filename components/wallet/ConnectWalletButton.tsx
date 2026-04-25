@@ -3,15 +3,17 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { Wallet, LogOut, Copy, Check, ChevronDown, ExternalLink, AlertCircle } from "lucide-react";
+import { Wallet, LogOut, Copy, Check, ChevronDown, ExternalLink, AlertCircle, Coins } from "lucide-react";
 import { useStellarAuth } from "@/context/StellarContext";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { useWalletBalance } from "@/hooks/useWalletBalance";
 
 export default function ConnectWalletButton() {
   const { publicKey, isConnected, connect, disconnect, isConnecting, isFreighterInstalled, isRestoring, error } = useStellarAuth();
   const [isOpen, setIsOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [errorExpanded, setErrorExpanded] = useState(false);
+  const { balance, isLoading: isBalanceLoading } = useWalletBalance(publicKey, isOpen);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
   const [showConfirm, setShowConfirm] = useState(false);
@@ -125,6 +127,19 @@ export default function ConnectWalletButton() {
             transition={{ duration: 0.2, ease: "easeOut" }}
             className="absolute right-0 top-full z-50 w-48 mt-2 glass rounded-xl border border-white/10 shadow-2xl overflow-hidden"
           >
+            {/* Balance display */}
+            <div className="px-3 py-2 border-b border-white/5 mb-1">
+              <p className="text-[10px] text-dark-500 uppercase tracking-widest font-semibold mb-0.5">Balance</p>
+              {isBalanceLoading ? (
+                <div className="h-4 w-20 bg-dark-800/60 rounded animate-pulse" />
+              ) : (
+                <p className="text-sm font-mono text-white flex items-center gap-1.5">
+                  <Coins size={13} className="text-brand-400" />
+                  {balance ?? "—"} XLM
+                </p>
+              )}
+            </div>
+
             <div className="p-1">
               <button
                 onClick={handleCopy}
