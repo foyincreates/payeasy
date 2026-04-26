@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import AppShell from "@/components/ui/app-shell";
 
 export const metadata: Metadata = {
   title: "PayEasy — Blockchain-Powered Rent Sharing for Roommates",
@@ -31,7 +32,9 @@ export default function RootLayout({
     <html lang="en">
       <body>
         <div className="mesh-gradient" aria-hidden="true" />
-        <div className="relative z-10">{children}</div>
+        <AppShell>
+          <div className="relative z-10">{children}</div>
+        </AppShell>
       </body>
     </html>
   );
