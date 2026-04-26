@@ -141,7 +141,7 @@ export default function EscrowDashboardClient({ contractId }: Props) {
   const truncatedContractId = formatContractId(contractId);
 
   return (
-    <main id="main-content" className="min-h-screen pt-32 pb-24 relative overflow-hidden bg-[#07070a]">
+    <main id="main-content" aria-label="Escrow Dashboard" className="min-h-screen pt-32 pb-24 relative overflow-hidden bg-[#07070a]">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(92,124,250,0.1),transparent_50%)] pointer-events-none" />
       <div className="mesh-gradient opacity-30 mix-blend-screen pointer-events-none fixed inset-0 saturate-150" />
 
@@ -268,7 +268,7 @@ export default function EscrowDashboardClient({ contractId }: Props) {
                     <button
                       onClick={() => void handleReleaseFunds()}
                       disabled={releasePhase !== "idle"}
-                      className="inline-flex items-center gap-2 self-start btn-primary !py-3 !px-6 !rounded-xl font-black uppercase tracking-widest shadow-lg shadow-brand-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="inline-flex items-center gap-2 w-full sm:w-auto justify-center btn-primary !py-3 !px-6 !rounded-xl font-black uppercase tracking-widest shadow-lg shadow-brand-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       {releasePhase === "building" ? (
                         <>
@@ -340,7 +340,7 @@ export default function EscrowDashboardClient({ contractId }: Props) {
                   <button
                     onClick={() => void handleClaimRefund()}
                     disabled={isClaimingRefund}
-                    className="btn-primary !py-3 !px-8 !rounded-xl font-black uppercase tracking-widest flex items-center gap-2 shrink-0 disabled:opacity-50"
+                    className="btn-primary !w-full sm:!w-auto !justify-center !py-3 !px-8 !rounded-xl font-black uppercase tracking-widest flex items-center gap-2 shrink-0 disabled:opacity-50"
                   >
                     {isClaimingRefund ? (
                       <>

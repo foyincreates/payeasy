@@ -449,7 +449,7 @@ export default function SettingsPage() {
   if (!isConnected) return null;
 
   return (
-    <div className="container mx-auto max-w-2xl px-4 py-8 space-y-6">
+    <main aria-label="Account Settings" className="container mx-auto max-w-2xl px-4 py-8 space-y-6">
       <div className="flex items-center gap-3">
         <Settings className="w-7 h-7 text-brand-400" />
         <h1 className="text-3xl font-bold tracking-tight text-gray-900 dark:text-white">
@@ -469,18 +469,18 @@ export default function SettingsPage() {
       <PrivacySection prefs={preferences} update={setPreferences} />
 
       <div className="flex flex-col sm:flex-row gap-3 pt-2">
-        <button onClick={save} className="btn-primary flex items-center justify-center gap-2">
+        <button onClick={save} className="btn-primary !w-full sm:!w-auto flex items-center justify-center gap-2">
           <Save className="w-4 h-4" />
           Save Settings
         </button>
         <button
           onClick={reset}
-          className="btn-secondary flex items-center justify-center gap-2"
+          className="btn-secondary !w-full sm:!w-auto flex items-center justify-center gap-2"
         >
           <RotateCcw className="w-4 h-4" />
           Reset to Defaults
         </button>
       </div>
-    </div>
+    </main>
   );
 }

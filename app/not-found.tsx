@@ -3,7 +3,7 @@ import { Wallet } from "lucide-react";
 
 export default function NotFound() {
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center px-6 text-center">
+    <main aria-label="Page Not Found" className="min-h-screen flex flex-col items-center justify-center px-6 text-center">
       {/* Floating "404" */}
       <div
         className="animate-float select-none mb-8"

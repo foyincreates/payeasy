@@ -13,7 +13,7 @@ export default function Home() {
   const router = useRouter();
 
   return (
-    <main id="main-content">
+    <main id="main-content" aria-label="Landing Page">
       <PayEasyHero
         logo={<PayEasyLogo size={34} />}
         navigation={[

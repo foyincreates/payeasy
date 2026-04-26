@@ -1,19 +1,12 @@
 "use client";
 
-import OfflineBanner from "./offline-banner";
-
-export default function AppShell({ children }: { children: React.ReactNode }) {
-  return (
-    <>
-      <OfflineBanner />
-      {children}
-    </>
 import { ThemeProvider } from "@/components/ui/theme-provider";
 import { DottedSurface } from "@/components/ui/dotted-surface";
 import { StellarProvider } from "@/context/StellarContext";
 import { ToastProvider } from "@/components/ui/toast-provider";
 import { SkipLink } from "@/components/ui/skip-link";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
+import OfflineBanner from "./offline-banner";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   return (
@@ -29,6 +22,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <StellarProvider>
         <ToastProvider>
           <ErrorBoundary>
+            <OfflineBanner />
             <div className="relative z-10">{children}</div>
           </ErrorBoundary>
         </ToastProvider>
@@ -36,3 +30,5 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     </ThemeProvider>
   );
 }
+
+export default AppShell;

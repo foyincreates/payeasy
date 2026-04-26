@@ -77,7 +77,7 @@ function SuccessContent() {
   };
 
   return (
-    <div className="flex min-h-[80vh] items-center justify-center p-4">
+    <main aria-label="Escrow Creation Success" className="flex min-h-[80vh] items-center justify-center p-4">
       <motion.div
         initial={{ opacity: 0, scale: 0.9 }}
         animate={{ opacity: 1, scale: 1 }}
@@ -142,7 +142,7 @@ function SuccessContent() {
           </button>
         </div>
       </motion.div>
-    </div>
+    </main>
   );
 }
 

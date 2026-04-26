@@ -5,7 +5,7 @@ import { motion } from "framer-motion";
 
 export default function Hero() {
   return (
-    <section className="relative min-h-screen flex items-center justify-center pt-20 pb-16 px-6 overflow-hidden">
+    <section aria-label="Hero Section" className="relative min-h-screen flex items-center justify-center pt-20 pb-16 px-6 overflow-hidden">
       {/* Animated orbs */}
       <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-brand-600/10 rounded-full blur-3xl animate-float" />
       <div

@@ -42,7 +42,7 @@ const steps = [
 
 export default function HowItWorks() {
   return (
-    <section id="how-it-works" className="py-24 px-6">
+    <section id="how-it-works" aria-label="How it Works Step-by-Step" className="py-24 px-6">
       <div className="max-w-7xl mx-auto">
         {/* Section Header */}
         <motion.div

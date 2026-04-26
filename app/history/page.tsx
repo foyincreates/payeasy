@@ -1,48 +1,3 @@
-import { Receipt } from "lucide-react";
-import EmptyState from "@/components/ui/empty-state";
-import Link from "next/link";
-
-export default function HistoryPage() {
-  const transactions: unknown[] = [];
-
-  return (
-    <main className="min-h-screen pt-24 pb-16 px-6">
-      <div className="max-w-4xl mx-auto">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-white">Payment History</h1>
-          <p className="text-dark-500 mt-1 text-sm">
-            All your escrow transactions in one place.
-          </p>
-        </div>
-
-        <div className="glass-card p-2">
-          {transactions.length === 0 ? (
-            <EmptyState
-              icon={Receipt}
-              title="No transactions yet"
-              description="Once you contribute to an escrow, your payment history will appear here."
-              action={{
-                label: "Create Escrow",
-                onClick: () => {
-                  window.location.href = "/escrow/new";
-                },
-              }}
-            />
-          ) : (
-            <ul>
-              {transactions.map((tx, i) => (
-                <li key={i}>{JSON.stringify(tx)}</li>
-              ))}
-            </ul>
-          )}
-        </div>
-
-        <div className="mt-6 text-center">
-          <Link href="/" className="text-sm text-dark-500 hover:text-brand-400 transition-colors">
-            &larr; Back to home
-          </Link>
-        </div>
-      </div>
 import { Metadata } from "next";
 import { Suspense } from "react";
 import HistoryClient from "./HistoryClient";
@@ -57,7 +12,7 @@ export const metadata: Metadata = {
 
 export default function HistoryPage() {
   return (
-    <main id="main-content" className="min-h-screen pt-28 pb-20 relative overflow-hidden bg-[#0a0a0f]">
+    <main id="main-content" aria-label="Transaction History" className="min-h-screen pt-28 pb-20 relative overflow-hidden bg-[#0a0a0f]">
       {/* Background aesthetics */}
       <div className="mesh-gradient opacity-40 mix-blend-screen pointer-events-none fixed inset-0" />
       <div className="absolute top-0 left-1/4 w-[500px] h-[500px] bg-brand-500/10 blur-[150px] rounded-full pointer-events-none" />

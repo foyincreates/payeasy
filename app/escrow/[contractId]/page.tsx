@@ -14,3 +14,4 @@ export async function generateMetadata({ params }: { params: { contractId: strin
 export default function EscrowDashboardPage({ params }: { params: { contractId: string } }) {
   return <EscrowDashboardClient contractId={params.contractId} />;
 }
+

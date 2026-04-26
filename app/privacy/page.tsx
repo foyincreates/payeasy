@@ -3,7 +3,7 @@ import { ChevronLeft, Shield } from "lucide-react";
 
 export default function PrivacyPage() {
   return (
-    <main className="min-h-screen pt-32 pb-24 relative overflow-hidden bg-[#07070a]">
+    <main aria-label="Privacy Policy" className="min-h-screen pt-32 pb-24 relative overflow-hidden bg-[#07070a]">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(92,124,250,0.1),transparent_50%)] pointer-events-none" />
       
       <div className="container relative z-10 mx-auto px-6 max-w-4xl">

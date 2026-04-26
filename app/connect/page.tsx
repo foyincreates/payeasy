@@ -130,7 +130,7 @@ export default function ConnectWalletPage() {
 
 
   return (
-    <main id="main-content" className="relative min-h-screen flex flex-col items-center justify-center px-4 py-12 overflow-hidden">
+    <main id="main-content" aria-label="Connect Wallet" className="relative min-h-screen flex flex-col items-center justify-center px-4 py-12 overflow-hidden">
       {/* Background effects */}
       <div className="absolute inset-0 pointer-events-none" aria-hidden="true">
         <div
