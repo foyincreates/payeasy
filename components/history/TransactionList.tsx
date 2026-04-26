@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import TransactionCard, { type Transaction } from "./TransactionCard";
+import DateRangeFilter from "./DateRangeFilter";
 import { Search, Filter, ArrowRight, ArrowLeft } from "lucide-react";
 
 interface TransactionListProps {
@@ -12,21 +13,59 @@ interface TransactionListProps {
 }
 
 /**
+ * Returns the start-of-day Date for a given ISO date string (YYYY-MM-DD),
+ * interpreted as local time so the comparison is intuitive for the user.
+ */
+function toLocalDate(iso: string): Date {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
+/**
  * A container component for displaying a filtered and paginated list of transactions.
- * Features search and filter UI components for enhanced usability.
+ * Features search, date-range filter, and pagination UI.
  */
 export default function TransactionList({ initialTransactions }: TransactionListProps) {
   const [page, setPage] = useState(1);
   const itemsPerPage = 6;
-  
+
   const [searchQuery, setSearchQuery] = useState("");
-  
-  // Basic filtering for demo purposes
-  const filteredTransactions = initialTransactions.filter(tx => 
-    tx.txHash.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    tx.amount.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    tx.type.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+
+  // ── Filtering ─────────────────────────────────────────────
+  const filteredTransactions = useMemo(() => {
+    return initialTransactions.filter((tx) => {
+      // Text search
+      const matchesSearch =
+        searchQuery === "" ||
+        tx.txHash.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        tx.amount.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        tx.type.toLowerCase().includes(searchQuery.toLowerCase());
+
+      // Date range
+      let matchesDate = true;
+      if (dateFrom || dateTo) {
+        const txDate = new Date(tx.timestamp);
+
+        if (dateFrom) {
+          const fromDate = toLocalDate(dateFrom);
+          matchesDate = matchesDate && txDate >= fromDate;
+        }
+
+        if (dateTo) {
+          const toDate = toLocalDate(dateTo);
+          // Include the entire "to" day (up to 23:59:59.999)
+          toDate.setHours(23, 59, 59, 999);
+          matchesDate = matchesDate && txDate <= toDate;
+        }
+      }
+
+      return matchesSearch && matchesDate;
+    });
+  }, [initialTransactions, searchQuery, dateFrom, dateTo]);
+
+  const isDateFilterActive = dateFrom !== "" || dateTo !== "";
 
   const totalPages = Math.ceil(filteredTransactions.length / itemsPerPage) || 1;
   const safePage = Math.min(page, totalPages);
@@ -36,34 +75,56 @@ export default function TransactionList({ initialTransactions }: TransactionList
     safePage * itemsPerPage
   );
 
+  function handleClearDates() {
+    setDateFrom("");
+    setDateTo("");
+    setPage(1);
+  }
+
   return (
     <div className="space-y-6">
       {/* List Control Header */}
-      <div className="flex flex-col md:flex-row gap-4 justify-between items-center mb-10 bg-white/5 border border-white/5 p-4 rounded-2xl backdrop-blur-md">
-        <div className="relative w-full md:w-96 group">
-          <label htmlFor="tx-search" className="sr-only">Search transactions</label>
-          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-dark-500 group-focus-within:text-brand-400 transition-colors" />
-          <input
-            id="tx-search"
-            type="text"
-            placeholder="Search by amount, hash, or type..."
-            value={searchQuery}
-            onChange={(e) => {
-              setSearchQuery(e.target.value);
-              setPage(1);
-            }}
-            className="w-full bg-dark-900/50 border border-white/10 rounded-xl py-3 pl-11 pr-5 text-sm focus:outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10 placeholder:text-dark-600 transition-all font-medium"
-          />
+      <div className="flex flex-col gap-4 mb-10 bg-white/5 border border-white/5 p-4 rounded-2xl backdrop-blur-md">
+        {/* Row 1: Search + existing buttons */}
+        <div className="flex flex-col md:flex-row gap-4 justify-between items-center">
+          <div className="relative w-full md:w-96 group">
+            <label htmlFor="tx-search" className="sr-only">Search transactions</label>
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-dark-500 group-focus-within:text-brand-400 transition-colors" />
+            <input
+              id="tx-search"
+              type="text"
+              placeholder="Search by amount, hash, or type..."
+              value={searchQuery}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setPage(1);
+              }}
+              className="w-full bg-dark-900/50 border border-white/10 rounded-xl py-3 pl-11 pr-5 text-sm focus:outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10 placeholder:text-dark-600 transition-all font-medium"
+            />
+          </div>
+
+          <div className="flex items-center gap-3 w-full md:w-auto">
+            <button className="flex-1 md:flex-none btn-secondary !py-2.5 !px-4 !text-xs !bg-dark-900/40 !border-white/10 hover:!border-white/20">
+              <Filter className="h-3.5 w-3.5" />
+              Types
+            </button>
+            <button className="flex-1 md:flex-none btn-secondary !py-2.5 !px-4 !text-xs !bg-dark-900/40 !border-white/10 hover:!border-white/20">
+              Latest First
+            </button>
+          </div>
         </div>
-        
-        <div className="flex items-center gap-3 w-full md:w-auto">
-          <button className="flex-1 md:flex-none btn-secondary !py-2.5 !px-4 !text-xs !bg-dark-900/40 !border-white/10 hover:!border-white/20">
-            <Filter className="h-3.5 w-3.5" />
-            Types
-          </button>
-          <button className="flex-1 md:flex-none btn-secondary !py-2.5 !px-4 !text-xs !bg-dark-900/40 !border-white/10 hover:!border-white/20">
-            Latest First
-          </button>
+
+        {/* Row 2: Date Range Filter */}
+        <div className="border-t border-white/5 pt-4">
+          <DateRangeFilter
+            from={dateFrom}
+            to={dateTo}
+            onFromChange={(v) => { setDateFrom(v); setPage(1); }}
+            onToChange={(v) => { setDateTo(v); setPage(1); }}
+            onClear={handleClearDates}
+            filteredCount={filteredTransactions.length}
+            totalCount={initialTransactions.length}
+          />
         </div>
       </div>
 
@@ -80,7 +141,19 @@ export default function TransactionList({ initialTransactions }: TransactionList
             <Search className="h-6 w-6 text-dark-600" />
           </div>
           <h3 className="text-dark-200 font-bold">No transactions found</h3>
-          <p className="text-dark-500 text-sm mt-1">Try adjusting your search criteria</p>
+          <p className="text-dark-500 text-sm mt-1">
+            {isDateFilterActive
+              ? "No transactions match the selected date range"
+              : "Try adjusting your search criteria"}
+          </p>
+          {isDateFilterActive && (
+            <button
+              onClick={handleClearDates}
+              className="mt-4 text-brand-400 text-sm font-bold hover:text-brand-300 transition-colors"
+            >
+              Clear date filter
+            </button>
+          )}
         </div>
       )}
 
@@ -89,7 +162,7 @@ export default function TransactionList({ initialTransactions }: TransactionList
         <p className="text-[11px] text-dark-500 uppercase tracking-widest font-black">
           Page <span className="text-brand-400 px-1">{safePage}</span> of <span className="text-dark-200 px-1">{totalPages}</span> — {filteredTransactions.length} Total
         </p>
-        
+
         <div className="flex items-center gap-3 bg-white/5 p-1 rounded-2xl border border-white/10 backdrop-blur-md">
           <button
             onClick={() => setPage(p => Math.max(1, p - 1))}
@@ -99,15 +172,15 @@ export default function TransactionList({ initialTransactions }: TransactionList
           >
             <ArrowLeft className="h-4 w-4" />
           </button>
-          
+
           <div className="hidden sm:flex items-center gap-1.5 px-3">
             {[...Array(totalPages)].map((_, i) => (
               <button
                 key={i}
                 onClick={() => setPage(i + 1)}
                 className={`h-10 w-10 rounded-xl text-xs font-black transition-all hover:scale-105 active:scale-95 ${
-                  safePage === i + 1 
-                    ? "bg-brand-500 text-white shadow-[0_4px_20px_rgba(76,110,245,0.4)] scale-110" 
+                  safePage === i + 1
+                    ? "bg-brand-500 text-white shadow-[0_4px_20px_rgba(76,110,245,0.4)] scale-110"
                     : "bg-white/5 text-dark-400 hover:bg-white/10"
                 }`}
               >
