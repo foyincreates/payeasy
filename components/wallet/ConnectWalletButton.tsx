@@ -9,6 +9,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { BottomSheet } from "@/components/ui/bottom-sheet";
 import { useWalletBalance } from "@/hooks/useWalletBalance";
 import { getCurrentNetwork } from "@/lib/stellar/config";
+import CopyButton from "@/components/ui/copy-button";
 import { getFreighterNetwork, isWalletNetworkMismatch } from "@/lib/stellar/wallet";
 
 function useIsMobile() {
@@ -155,17 +156,13 @@ export default function ConnectWalletButton() {
 
   const menuItems = (
     <>
-      <button
-        onClick={handleCopy}
-        className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-dark-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
-      >
-        {copied ? (
-          <Check size={16} className="text-emerald-500" />
-        ) : (
+      <div className="flex items-center justify-between px-3 py-2.5 hover:bg-white/5 rounded-lg transition-colors">
+        <div className="flex items-center gap-3 text-sm text-dark-300">
           <Copy size={16} />
-        )}
-        <span>{copied ? "Copied!" : "Copy Address"}</span>
-      </button>
+          <span>Copy Address</span>
+        </div>
+        <CopyButton value={publicKey || ""} label="Copy wallet address" className="!p-1 hover:!bg-transparent" />
+      </div>
 
       <button
         onClick={() => { setIsOpen(false); router.push("/connect"); }}
@@ -197,6 +194,7 @@ export default function ConnectWalletButton() {
         <span className="text-sm font-medium text-white font-mono">{truncatedKey}</span>
         <ChevronDown
           size={16}
+          aria-label="Toggle wallet menu"
           className={`text-dark-400 transition-transform duration-300 ${isOpen ? "rotate-180" : ""}`}
         />
         {hasNetworkMismatch && (
@@ -264,17 +262,13 @@ export default function ConnectWalletButton() {
             </div>
 
             <div className="p-1">
-              <button
-                onClick={handleCopy}
-                className="w-full flex items-center gap-3 px-3 py-2 text-sm text-dark-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
-              >
-                {copied ? (
-                  <Check size={16} className="text-emerald-500" />
-                ) : (
+              <div className="flex items-center justify-between px-3 py-2 hover:bg-white/5 rounded-lg transition-colors">
+                <div className="flex items-center gap-3 text-sm text-dark-300">
                   <Copy size={16} />
-                )}
-                <span>{copied ? "Copied!" : "Copy Address"}</span>
-              </button>
+                  <span>Copy Address</span>
+                </div>
+                <CopyButton value={publicKey || ""} label="Copy wallet address" className="!p-1 hover:!bg-transparent" />
+              </div>
               
               <button
                 onClick={() => { setIsOpen(false); router.push("/connect"); }}

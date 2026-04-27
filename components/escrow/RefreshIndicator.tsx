@@ -34,6 +34,7 @@ export default function RefreshIndicator({ onRefresh }: { onRefresh: () => Promi
         disabled={isRefreshing}
         className="p-1.5 rounded-lg bg-white/5 border border-white/10 hover:bg-brand-500 hover:border-brand-400 hover:text-white transition-all outline-none"
         title="Refresh"
+        aria-label="Refresh data"
       >
         <RefreshCw className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />
       </button>

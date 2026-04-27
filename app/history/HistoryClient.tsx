@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import TransactionList from "@/components/history/TransactionList";
 import { type Transaction, type TransactionType } from "@/components/history/TransactionCard";
 import { useStellar } from "@/context/StellarContext";
@@ -13,6 +14,8 @@ import {
   type TransactionHistoryPager,
 } from "@/lib/stellar/history";
 import useTransactionPolling from "@/hooks/useTransactionPolling";
+import EmptyState from "@/components/ui/empty-state";
+import { History } from "lucide-react";
 
 function formatOperationAmount(operation?: ParsedOperation): string {
   if (!operation?.amount) return "--";
@@ -53,7 +56,8 @@ function mapParsedTransaction(tx: ParsedTransaction): Transaction {
 }
 
 export default function HistoryClient() {
-  const { publicKey, isConnected } = useStellar();
+  const { publicKey, isConnected, isRestoring } = useStellar();
+  const router = useRouter();
 
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [isLoadingInitial, setIsLoadingInitial] = useState(true);
@@ -66,6 +70,12 @@ export default function HistoryClient() {
   const fadeTimersRef = useRef<Record<string, number>>({});
 
   const horizonClient = useMemo(() => createHorizonClient(), []);
+
+  useEffect(() => {
+    if (!isRestoring && !publicKey) {
+      router.push("/connect");
+    }
+  }, [publicKey, isRestoring, router]);
 
   useEffect(() => {
     return () => {
@@ -136,8 +146,10 @@ export default function HistoryClient() {
   }, [horizonClient, publicKey]);
 
   useEffect(() => {
-    void loadInitial();
-  }, [loadInitial]);
+    if (publicKey) {
+      void loadInitial();
+    }
+  }, [loadInitial, publicKey]);
 
   const handleLoadMore = useCallback(async () => {
     const pager = pagerRef.current;
@@ -179,16 +191,29 @@ export default function HistoryClient() {
     return () => window.removeEventListener("unhandledrejection", listener);
   }, []);
 
-  if (!publicKey) {
+  if (isRestoring || (isLoadingInitial && publicKey)) {
     return (
-      <div className="glass-card border border-white/10 p-8 text-center">
-        <p className="text-dark-300 text-sm font-medium">Connect your wallet to load on-chain transaction history.</p>
+      <div className="flex flex-col items-center justify-center py-20 animate-pulse">
+        <div className="h-8 w-48 bg-white/5 rounded-lg mb-4" />
+        <div className="h-4 w-64 bg-white/5 rounded-lg" />
       </div>
     );
   }
 
-  if (isLoadingInitial) {
-    return <div className="text-dark-400 text-sm">Loading transactions...</div>;
+  if (!publicKey) return null;
+
+  if (transactions.length === 0) {
+    return (
+      <EmptyState
+        icon={History}
+        title="No Activity Yet"
+        description="Your Stellar transaction history is currently empty. Start by creating or contributing to an escrow agreement."
+        action={{
+          label: "Go to Dashboard",
+          onClick: () => router.push("/dashboard"),
+        }}
+      />
+    );
   }
 
   return (

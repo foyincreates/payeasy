@@ -27,6 +27,7 @@ import { isOnboarded, markOnboarded } from "@/components/ui/onboarding-card.help
 import FundTestnetButton from "@/components/wallet/FundTestnetButton";
 import { getFreighterNetwork, isFreighterVersionSupported } from "@/lib/stellar/wallet";
 import { getCurrentNetwork } from "@/lib/stellar/config";
+import CopyButton from "@/components/ui/copy-button";
 
 const FEATURES = [
   {
@@ -490,17 +491,12 @@ export default function ConnectWalletPage() {
                   <code className="flex-1 min-w-0 text-sm text-dark-200 bg-dark-950/60 rounded-xl px-4 py-3 font-mono truncate border border-white/5">
                     {publicKey}
                   </code>
-                  <button
-                    onClick={handleCopy}
-                    className="p-3 rounded-xl glass hover:bg-white/10 transition-colors shrink-0"
-                    title="Copy address"
-                  >
-                    {copied ? (
-                      <Check size={18} className="text-accent-400" />
-                    ) : (
-                      <Copy size={18} className="text-dark-400" />
-                    )}
-                  </button>
+                  <CopyButton 
+                    value={publicKey} 
+                    label="Copy wallet address" 
+                    iconSize={18} 
+                    className="!p-3 rounded-xl glass hover:bg-white/10 transition-colors shrink-0" 
+                  />
                   <a
                     href={getExplorerLink("account", publicKey)}
                     target="_blank"

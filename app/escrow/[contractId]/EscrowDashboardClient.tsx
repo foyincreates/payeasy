@@ -191,6 +191,7 @@ export default function EscrowDashboardClient({ contractId }: Props) {
                 rel="noopener noreferrer"
                 className="p-1.5 rounded-lg text-dark-500 hover:text-brand-400 hover:bg-white/5 transition-all outline-none"
                 title="View on Stellar Expert"
+                aria-label="View on Stellar Expert"
               >
                 <ExternalLink className="h-4 w-4" />
               </a>
